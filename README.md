@@ -2,16 +2,18 @@
 
 Repository revision: **X1**. Application package version: **0.4.0**.
 
+Download ready-to-install Windows packages from the [X1 release](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X1). SHA-256 checksum files are included with the downloads.
+
 This repository contains two applications with separate Windows installers:
 
 | Application | Source and guide | Installed on | Installer |
 |---|---|---|---|
-| SCADA Collector | [collector/](collector/README.md) | SCADA PC | `Linker-SCADA-Collector-Setup.exe` |
-| Central Server | [server/](server/README.md) | Central server PC; same PC for local tests | `Linker-Central-Server-Setup.exe` |
+| SCADA Collector | [collector/](collector/README.md) | SCADA PC | [Download installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X1/Linker-SCADA-Collector-Setup.exe) |
+| Central Server | [server/](server/README.md) | Central server PC; same PC for local tests | [Download installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X1/Linker-Central-Server-Setup.exe) |
 
 `shared/` contains the common upload protocol and encrypted setup-file format. `deploy/` contains deployment and build scripts; `docs/` contains specifications and operating guides. Keeping the applications in one repository lets changes to their shared interface be reviewed together. Each PC installs only its required application.
 
-Build the Collector with `deploy/windows/build.ps1` and the Central Server with `deploy/windows/build-server.ps1`. Generated installers are in `dist/installer` and are excluded from source control along with operational credentials, databases and logs.
+Build the Collector with `deploy/windows/build.ps1` and the Central Server with `deploy/windows/build-server.ps1`. Build outputs are written to `dist/installer` and published as GitHub Release assets. Operational credentials, databases, logs and local build directories are excluded from the source history.
 
 Version 0.4 adds Local testing and Network server modes, saved listener/hostname settings, managed matching HTTPS certificates, and an authenticated collector connection test. Collection, durable queueing and encrypted setup export/import remain available. Customer read APIs, the Web Portal, analytics, Grafana, OIDC and notifications remain later phases.
 

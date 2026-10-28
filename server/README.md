@@ -6,6 +6,8 @@ The separate [SCADA Collector](../collector/README.md) runs on the SCADA PC. It 
 
 ## Windows package
 
+[Download the X1 Central Server installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X1/Linker-Central-Server-Setup.exe). [Release notes and checksums](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X1).
+
 - Installer: `dist/installer/Linker-Central-Server-Setup.exe`.
 - Standalone executable: `dist/central-server/central-server.exe`.
 - Development launcher: `Launch Central Server.cmd` in the repository root.
