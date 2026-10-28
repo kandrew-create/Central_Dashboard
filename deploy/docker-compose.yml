@@ -1,0 +1,100 @@
+name: linker-scada
+x-app: &app
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: {max-size: '10m', max-file: '3'}
+
+services:
+  db:
+    image: postgres:17.6
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: scada_platform
+      POSTGRES_USER: scada_migrator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set migration password}
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U scada_migrator -d scada_platform']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [database]
+    logging:
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
+  migrate:
+    <<: *app
+    restart: 'no'
+    environment:
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Set migration URL}
+    command: [alembic, upgrade, head]
+    depends_on: {db: {condition: service_healthy}}
+    networks: [database]
+  provision-runtime:
+    <<: *app
+    restart: 'no'
+    environment:
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Set migration URL}
+      INGEST_DATABASE_PASSWORD: ${INGEST_DATABASE_PASSWORD:?Set API login password}
+      WORKER_DATABASE_PASSWORD: ${WORKER_DATABASE_PASSWORD:?Set worker login password}
+    command: [python, -m, server.admin, runtime-logins]
+    depends_on: {migrate: {condition: service_completed_successfully}}
+    networks: [database]
+  api:
+    <<: *app
+    environment:
+      INGEST_DATABASE_URL: ${INGEST_DATABASE_URL:?Set restricted API URL}
+    command: [uvicorn, 'server.app.ingestion:app', --host, 0.0.0.0, --port, '8000', --no-access-log, --no-proxy-headers]
+    depends_on: {provision-runtime: {condition: service_completed_successfully}}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [database, gateway]
+  worker:
+    <<: *app
+    environment:
+      WORKER_DATABASE_URL: ${WORKER_DATABASE_URL:?Set restricted worker URL}
+    command: [python, -m, server.worker]
+    depends_on: {provision-runtime: {condition: service_completed_successfully}}
+    networks: [database]
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment: {SCADA_HOSTNAME: '${SCADA_HOSTNAME:?Set approved HTTPS hostname}'}
+    ports: ['80:80', '443:443']
+    volumes: ['./Caddyfile:/etc/caddy/Caddyfile:ro', 'caddy-data:/data', 'caddy-config:/config']
+    depends_on: {api: {condition: service_healthy}}
+    networks: [gateway]
+    logging:
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
+  test:
+    profiles: [test]
+    build: {context: .., dockerfile: deploy/Dockerfile, target: test}
+    environment:
+      SCADA_TEST_POSTGRES: '1'
+      PGHOST: db
+      PGPORT: '5432'
+      PGDATABASE: postgres
+      PGUSER: scada_migrator
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set disposable-test password}
+    command: [pytest, -q]
+    depends_on: {db: {condition: service_healthy}}
+    networks: [database]
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
+networks:
+  database: {internal: true}
+  gateway:

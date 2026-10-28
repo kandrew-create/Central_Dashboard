@@ -1,0 +1,12 @@
+include README.md pyproject.toml alembic.ini .env.example .dockerignore
+include *.cmd
+recursive-include docs *.md
+recursive-include deploy *.py *.sql *.yml *.lock Dockerfile Caddyfile *.sh *.ps1 *.iss
+recursive-include tests *.py *.sql
+recursive-include collector/tests *.py
+recursive-include server/tests *.py
+prune .tools
+prune collector-local
+prune build
+prune dist
+global-exclude *.dpapi *.sqlite3 *.log *.pyc *.linker-collector ca-key.pem localhost-key.pem

@@ -1,0 +1,54 @@
+# Use `python -m collector init` to generate a protected local copy on Windows.
+version = 1
+
+[database]
+host = "localhost"
+port = 5432
+name = "scada"
+user = "scada_collector"
+sslmode = "disable"
+connect_timeout_seconds = 5
+statement_timeout_ms = 5000
+lock_timeout_ms = 1000
+
+[source]
+profile = "ecostruxure_machine_scada_expert_v1"
+schema = "public"
+alarm_table = "alarmhistory"
+event_table = "eventhistory"
+# Empty means unknown. Supply the actual source IANA timezone during setup.
+timezone = ""
+
+[limits]
+preview_rows = 20
+max_field_bytes = 4096
+max_output_bytes = 262144
+
+[collection]
+source_id = ""
+generation_id = ""
+collection_enabled = false
+marker_verified = false
+scan_mode = "id_range"
+history_start = ""
+history_end = ""
+all_history = false
+page_rows = 50
+max_pages = 10
+overlap_seconds = 600
+reconcile_ids = 10000
+queue_bytes = 268435456
+min_free_bytes = 104857600
+privacy = "upload_all"
+
+[upload]
+upload_url = ""
+upload_enabled = false
+upload_ca_file = ""
+
+[schedule]
+interval_seconds = 60
+schedule_mode = "interval"
+schedule_timezone = "UTC"
+schedule_time = "02:00"
+schedule_weekday = 0

@@ -1,0 +1,25 @@
+{$SCADA_HOSTNAME} {
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options nosniff
+        -Server
+    }
+    request_body {
+        max_size 1048576
+    }
+    @ingestion {
+        method POST
+        path /v1/uploads /v1/collector-check
+    }
+    handle @ingestion {
+        reverse_proxy api:8000 {
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 30s
+            }
+        }
+    }
+    handle {
+        respond "Not found" 404
+    }
+}
