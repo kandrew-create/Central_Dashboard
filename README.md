@@ -15,6 +15,8 @@ This repository contains two applications with separate Windows installers:
 
 Build the Collector with `deploy/windows/build.ps1` and the Central Server with `deploy/windows/build-server.ps1`. Build outputs are written to `dist/installer` and published as GitHub Release assets. Operational credentials, databases, logs and local build directories are excluded from the source history.
 
+Pending automation work is tracked in the [CI/CD pipeline punchlist](docs/ci-cd-punchlist.md).
+
 Version 0.4 adds Local testing and Network server modes, saved listener/hostname settings, managed matching HTTPS certificates, and an authenticated collector connection test. Collection, durable queueing and encrypted setup export/import remain available. Customer read APIs, the Web Portal, analytics, Grafana, OIDC and notifications remain later phases.
 
 Open **Launch Central Server.cmd** for Software 2 on this PC. Use **Server status** to start/stop the central database, HTTPS API and worker; **Register SCADA source** to create IDs and a protected credential; and **Sources & collector setup** to export a password-encrypted `.linker-collector` file. In the updated collector, open **3 Collection & upload → Import server setup**. See the [Central Server Windows guide](docs/central-server-windows.md). The existing `LOCAL-SCADA` source can be selected and exported directly; registering it again is unnecessary.
