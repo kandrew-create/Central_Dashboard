@@ -1,6 +1,6 @@
-# SCADA Collector 0.4
+# SCADA Collector 0.4 — revision X2
 
-[Download the X1 SCADA Collector installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X1/Linker-SCADA-Collector-Setup.exe). [Release notes and checksums](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X1).
+[Download the X2 SCADA Collector installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X2/Linker-SCADA-Collector-Setup.exe). [Release notes and checksums](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X2).
 
 The native Windows GUI and CLI provide protected connection setup, bounded previews, automatic collection, durable staging, confirmed delivery and status. A native Windows service wrapper and installer are included. Installation, startup under a dedicated account, and representative customer commissioning still require separate verification.
 
@@ -78,5 +78,11 @@ PostgreSQL integration requires `SCADA_TEST_POSTGRES=1`, `PSQL`, `PGHOST`, `PGPO
 ## Central Server provisioning files (v0.3)
 
 In **3 Collection & upload**, use **Import server setup** to load a password-encrypted `.linker-collector` file exported from the Central Server window. Save local edits and stop automatic collection before importing. This supplies the source/generation IDs, destination, protected upload credential and CA certificate; database access, history approval, limits and schedules remain local. A file for different source/generation IDs cannot replace an assigned collector's state. See the [Central Server Windows guide](../docs/central-server-windows.md).
+
+In the current rebuilt Collector, pending edits to the Source ID, Generation ID, HTTPS URL, upload enable flag or upload CA path do not disable import: the selected server setup supplies those fields using the last saved local configuration. This resolves the case where enabling uploads with a blank URL prevents saving and previously disabled import. Unsaved local database/history/schedule changes or a typed unstored database password must still be saved/stored first. New setups explain the required local save when Import is clicked. Busy operations and automatic collection still block import.
+
+After import, the **Upload credential** entry stays blank because the secret is stored with current-user Windows protection. The new credential-status message confirms that a protected credential file is present; **Test server** verifies that it can be unlocked and accepted. Do not enter the setup-file encryption password in the upload-credential field. These UI changes are included in X2; X1 remains an older download.
+
+Completed server checks, credential storage and collection-status refreshes now replace their in-progress footer messages, so a successful action does not continue showing “Testing…” or “Protecting…”.
 
 Version 0.4 supports network destinations exported by Central Server **4 Connection & mode**. **Test server** verifies HTTPS, upload credential and the active source/generation without uploading records or advancing state. Source database testing remains a separate **Test connection** action. Use Local testing for one PC and Network server for collectors on other PCs; setup changes require a fresh local import.

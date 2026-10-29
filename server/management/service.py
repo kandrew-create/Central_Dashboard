@@ -5,6 +5,7 @@ from functools import wraps
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import ssl
@@ -37,9 +38,16 @@ def operation(function):
 
 
 def text(value,label):
-    if not isinstance(value,str) or not value.strip() or len(value.strip())>255 or any(ord(c)<32 for c in value):
-        raise CollectorError(f'Enter a {label} from 1 to 255 characters.')
-    return value.strip()
+    if not isinstance(value,str):
+        raise CollectorError(f'Enter a {label}.')
+    value=re.sub(r'[ \t]*[\r\n\t]+[ \t]*',' ',value).strip()
+    if not value:
+        raise CollectorError(f'Enter a {label}.')
+    if len(value)>255:
+        raise CollectorError(f'The {label} must be 255 characters or fewer (currently {len(value)}).')
+    if any(ord(c)<32 or 127<=ord(c)<=159 for c in value):
+        raise CollectorError(f'The {label} contains an unsupported control character. Retype the name as plain text.')
+    return value
 
 
 class ManagerService:

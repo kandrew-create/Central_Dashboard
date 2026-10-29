@@ -5,6 +5,7 @@ import tkinter as tk
 import unittest
 from unittest.mock import Mock,patch
 from uuid import uuid4
+from collector.errors import CollectorError
 import io
 import os
 
@@ -90,11 +91,62 @@ class ManagerWindowTests(unittest.TestCase):
         self.assertIsNone(params['project_id'])
         self.assertEqual(params['source_name'],'SCADA PC')
 
+    def test_registration_normalizes_pasted_names_before_sending_them(self):
+        for name,value in dict(customer=' Customer\r\n',site='Site',project='Project\r\nName',machine='M-1',source='SCADA PC').items():
+            self.app.names[name].set(value)
+        with patch('server.management.gui.messagebox.showerror') as error:
+            self.app.register_source();self.wait_idle()
+        error.assert_not_called()
+        values=self.service.register.call_args.kwargs
+        self.assertEqual(values['project_name'],'Project Name')
+        self.assertEqual(values['customer_name'],'Customer')
+        self.assertEqual(self.app.names['project'].get(),'Project Name')
+
+    def test_registration_invalid_project_is_rejected_before_database_work(self):
+        for name,value in dict(customer='Customer',site='Site',project='Project\x00Name',machine='M-1',source='SCADA PC').items():
+            self.app.names[name].set(value)
+        with patch('server.management.gui.messagebox.showerror') as error:
+            self.app.register_source();self.wait_idle()
+        self.service.register.assert_not_called()
+        error.assert_called_once()
+        self.assertIn('project name',self.app.status_text.get())
+        self.assertIn('control character',self.app.status_text.get())
+
     def test_refuses_location_change_while_server_running(self):
         self.app.https_port.set('8444')
         with patch('server.management.gui.save_settings') as save,patch('server.management.gui.messagebox.showerror') as error:
             self.app.save_locations();self.wait_idle()
         save.assert_not_called();error.assert_called_once()
+
+    def test_save_confirmation_survives_refresh_when_database_is_stopped(self):
+        self.app.https_port.set('8444')
+        settings=self.app._form_settings()
+        self.status.update(api_ready=False,database_ready=False,worker_running=False,
+                           error='Central database is stopped or unavailable under this Windows account.')
+        updated=Mock(spec=ManagerService)
+        updated.settings=settings
+        updated.status.return_value=dict(self.status,upload_url=settings.upload_url)
+        with patch('server.management.gui.save_settings') as save,patch('server.management.gui.ManagerService',return_value=updated),patch('server.management.gui.messagebox.showerror') as error:
+            self.app.save_locations();self.wait_idle()
+        save.assert_called_once_with(settings)
+        error.assert_not_called()
+        self.assertEqual(self.app.status_text.get(),'Server settings saved successfully.')
+        self.assertIn('PostgreSQL: Stopped',self.app.health_text.get())
+        self.assertIn(':8444/',self.app.endpoint.get())
+
+    def test_save_failure_keeps_error_without_showing_success(self):
+        message='Cannot save settings; check local file permissions.'
+        with patch('server.management.gui.save_settings',side_effect=CollectorError(message)),patch('server.management.gui.ManagerService') as manager,patch('server.management.gui.messagebox.showerror') as error:
+            self.app.save_locations();self.wait_idle()
+        manager.assert_not_called()
+        error.assert_called_once()
+        self.assertEqual(self.app.status_text.get(),message)
+
+    def test_manual_refresh_still_reports_database_status_errors(self):
+        self.status.update(api_ready=False,database_ready=False,worker_running=False,
+                           error='Central database is stopped or unavailable under this Windows account.')
+        self.app.refresh();self.wait_idle()
+        self.assertEqual(self.app.status_text.get(),self.status['error'])
 
     def test_network_mode_sets_listener_and_previews_destination_without_starting(self):
         self.app.mode.set('Network server (two PCs)');self.app._mode_changed()

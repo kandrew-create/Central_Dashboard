@@ -48,7 +48,9 @@ def main(argv=None):
     try:
         return _main(argv)
     except Exception as error:
+        from collector.errors import CollectorError
         message='Central Server operation failed. Check the local settings and protected component logs.'
+        if isinstance(error,CollectorError):message=str(error)
         if '--component' not in (sys.argv[1:] if argv is None else argv):
             from tkinter import messagebox
             messagebox.showerror('Central Server',message)

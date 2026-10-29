@@ -30,7 +30,7 @@ This repository contains the Linker SCADA Collector and Central Server. Read [RE
 
 ## Development commands
 
-Use Python 3.12 or 3.13; PostgreSQL integration and local commissioning use PostgreSQL 17. The following commands assume PowerShell, the repository root, and an existing `.venv`.
+Use Python 3.12 or 3.13. Central Server supports PostgreSQL 17 and 18; run integration tests on disposable clusters for both versions when changing compatibility. Selected server tools must share a supported major version and match any existing `database/PG_VERSION`; changing binaries is not a data migration. Saved paths and existing data must be preserved. The following commands assume PowerShell, the repository root, and an existing `.venv`.
 
 Install development dependencies:
 
@@ -61,6 +61,20 @@ Build Windows packages with PyInstaller and Inno Setup 6 installed:
 
 Both scripts accept `-Compiler` for a non-default Inno Setup compiler location. Collector executables go to `dist/collector`, Central Server to `dist/central-server`, and installers to `dist/installer`.
 
+Current download links target repository revision X2; application package version remains 0.4.0. Publish installers and their matching SHA-256 sidecars as GitHub Release assets, with release notes and verification links. Keep earlier release assets and local operational state intact.
+
+Central Server upgrades must stop the configured server before replacing files and preserve operational state. The installer uses the installed stop command before Restart Manager closes remaining processes; stop errors block the upgrade. Do not replace this with process-name-wide termination or stop an unrelated PostgreSQL service. Both Windows builds refresh SHA-256 sidecars for their executables and installer.
+
+For Network mode startup faults, verify that the saved listener is assigned to this PC; the collector PC address is not a valid server listener. Inspect protected API/control logs before interpreting a long health wait as database initialization. Correct addresses with the configured server stopped, preserve data, and reopen a manager whose settings were changed externally.
+
+Validate local listener availability before saving or starting, but never require it for loading/repairing settings or stopping the server. Failed starts must clean up their own newly launched API/worker components, retain data/credentials, and fail when either component exits. A stop on a never-initialized setup must not create state that blocks initialization.
+
+Keep settings-save confirmation separate from server readiness: a post-save refresh must not overwrite successful persistence with an expected stopped-database message. Actual save errors and explicit status-refresh errors must still be shown.
+
+Registration names are single-line labels: trim surrounding whitespace and fold pasted CR/LF/tab separators to spaces before enforcing the 1–255 character limit. Distinguish empty, overlength and unsupported-control-character errors. Validate new registration names before database work and preserve existing-item reuse and transaction rollback.
+
+Collector setup import must not be blocked by unsaved fields supplied by the setup file itself (IDs, URL, upload enable flag and CA path). Import against the last saved local configuration; preserve unsaved database/history/schedule changes by requiring an explicit save, and retain identity/queue/scheduler-lock guards. Explain missing local setup and show protected-credential presence without displaying secrets; Test server verifies validity.
+
 Validate the Docker Compose template without starting services:
 
 ```powershell
@@ -80,4 +94,4 @@ docker compose --env-file .env.example -f deploy/docker-compose.yml config --qui
 
 ## Latest project change
 
-2026-10-29: Added repository guidance, the rule to update `AGENTS.md` with every project change, and the CI/CD punchlist linked from README.
+2026-10-29: Prepared revision X2 with current source, tests, commissioning guides and verification reports; updated download links and [release notes](docs/release-X2.md) for the rebuilt Collector/Central Server installers and SHA-256 sidecars. Includes PostgreSQL 17/18, startup/upgrade, registration, save-message and Collector import fixes. X1 assets and local operational state remain unchanged.

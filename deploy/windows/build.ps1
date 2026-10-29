@@ -20,6 +20,10 @@ try {
         $ErrorActionPreference = 'Stop'
         if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
     } else { throw 'Inno Setup compiler not found. Executables were built; set -Compiler to build the installer.' }
-    Get-ChildItem -LiteralPath 'dist\collector' -Filter '*.exe' | Get-FileHash -Algorithm SHA256 | Format-Table
-    Get-ChildItem -LiteralPath 'dist\installer' -Filter '*.exe' | Get-FileHash -Algorithm SHA256 | Format-Table
+    $artifacts = @(Get-ChildItem -LiteralPath 'dist\collector' -Filter '*.exe') + @(Get-Item -LiteralPath 'dist\installer\Linker-SCADA-Collector-Setup.exe')
+    foreach ($artifact in $artifacts) {
+        $digest = Get-FileHash -Algorithm SHA256 -LiteralPath $artifact.FullName
+        Set-Content -LiteralPath ($artifact.FullName+'.sha256') -Encoding Ascii -Value ($digest.Hash.ToLowerInvariant()+'  '+$artifact.Name)
+        $digest
+    }
 } finally { Pop-Location }

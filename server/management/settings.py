@@ -1,13 +1,15 @@
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 import json
 import ipaddress
 import os
 import re
+import socket
 from pathlib import Path
 import sys
 
 from collector.errors import CollectorError
 from collector.secrets import restrict_access,write_private_file
+from server.management.postgres import SUPPORTED_MAJORS,default_postgres_bin,postgres_major
 
 
 def settings_path():
@@ -17,7 +19,7 @@ def settings_path():
 @dataclass(frozen=True)
 class ServerSettings:
     data_dir: Path
-    postgres_bin: Path=Path(r'C:\Program Files\PostgreSQL\17\bin')
+    postgres_bin: Path=field(default_factory=default_postgres_bin)
     database_port: int=55441
     https_port: int=8443
     mode: str='local'
@@ -57,18 +59,33 @@ class ServerSettings:
             raise CollectorError('Network server mode needs a LAN listen address and the central PC hostname/IP, not localhost.')
         return self
 
-    def validate(self):
+    def validate_listener(self):
+        try:
+            with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as probe:
+                probe.bind((self.listen_address,0))
+        except OSError:
+            raise CollectorError(f'HTTPS listen address {self.listen_address} is not available on this server PC. Use this server PC\'s IPv4 address, or 0.0.0.0 for all IPv4 adapters. The collector PC address does not belong in this field.') from None
+        return self
+
+    def validate(self,check_listener=True):
         self.validate_network()
+        if check_listener:self.validate_listener()
         if not self.data_dir.is_absolute() or self.data_dir.is_symlink():
             raise CollectorError('Choose an absolute, dedicated server data folder without symbolic links.')
-        if not self.postgres_bin.is_absolute() or any(not (self.postgres_bin/name).is_file() for name in ('pg_ctl.exe','initdb.exe')):
-            raise CollectorError('Select the PostgreSQL 17 bin folder containing pg_ctl.exe and initdb.exe.')
+        major=postgres_major(self.postgres_bin)
         if any(type(port) is not int or not 1024<=port<=65535 for port in (self.database_port,self.https_port)) or self.database_port==self.https_port:
             raise CollectorError('Choose distinct server ports from 1024 to 65535.')
         if self.data_dir.exists() and any(self.data_dir.iterdir()) and not (self.data_dir/'credentials.dpapi').is_file():
             raise CollectorError('This folder contains other files. Choose a new dedicated folder or an existing Central Server data folder.')
-        if (self.data_dir/'database/PG_VERSION').exists() and (self.data_dir/'database/PG_VERSION').read_text().strip()!='17':
-            raise CollectorError('This local server package requires a PostgreSQL 17 data directory.')
+        version_file=self.data_dir/'database/PG_VERSION'
+        if version_file.exists():
+            try:stored_major=int(version_file.read_text().strip())
+            except (OSError,ValueError):
+                raise CollectorError('Cannot read the Central Server database version. Preserve the data folder and check its PG_VERSION file.') from None
+            if stored_major not in SUPPORTED_MAJORS:
+                raise CollectorError('This Central Server database requires PostgreSQL 17 or 18. Migrate other major versions separately.')
+            if stored_major!=major:
+                raise CollectorError(f'This data folder uses PostgreSQL {stored_major}, but the selected binaries are PostgreSQL {major}. Select matching binaries; changing major versions requires a separate database migration.')
         return self
 
     def document(self):
@@ -94,7 +111,7 @@ def load_settings(path=None):
             raise CollectorError('Cannot read Central Server manager settings.') from None
     legacy=Path(__file__).resolve().parents[2]/'.tools/local-server'
     data_dir=legacy if not getattr(sys,'frozen',False) and (legacy/'credentials.dpapi').exists() else path.parent/'data'
-    return ServerSettings(data_dir.resolve())
+    return ServerSettings(data_dir.resolve(),default_postgres_bin(data_dir))
 
 
 def save_settings(settings,path=None):

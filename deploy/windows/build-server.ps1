@@ -18,5 +18,9 @@ try {
     & $Compiler (Join-Path $PSScriptRoot 'central-server.iss') 2>&1 | ForEach-Object { "$_" }
     $ErrorActionPreference = 'Stop'
     if ($LASTEXITCODE -ne 0) { throw 'Central Server installer build failed.' }
-    Get-FileHash -Algorithm SHA256 -LiteralPath 'dist\central-server\central-server.exe','dist\installer\Linker-Central-Server-Setup.exe'
+    foreach ($artifact in @('dist\central-server\central-server.exe','dist\installer\Linker-Central-Server-Setup.exe')) {
+        $digest = Get-FileHash -Algorithm SHA256 -LiteralPath $artifact
+        Set-Content -LiteralPath ($artifact+'.sha256') -Encoding Ascii -Value ($digest.Hash.ToLowerInvariant()+'  '+(Split-Path -Leaf $artifact))
+        $digest
+    }
 } finally { Pop-Location }

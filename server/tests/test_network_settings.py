@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import Mock,patch
 
 from cryptography import x509
 
@@ -13,6 +14,53 @@ from server.management.tls import ensure_certificates,validate_certificate
 
 
 class NetworkSettingsTests(unittest.TestCase):
+    def test_local_listener_probe_accepts_loopback_and_all_adapters(self):
+        base=ServerSettings(Path('C:/central-server'))
+        self.assertIs(base.validate_listener(),base)
+        replace(base,mode='network',listen_address='0.0.0.0',server_host='central-pc').validate_listener()
+
+    def test_unassigned_listener_blocks_save_and_start_before_changing_state(self):
+        from server.management.runtime import control
+        with tempfile.TemporaryDirectory() as temporary:
+            folder=Path(temporary)
+            path=folder/'manager.json';path.write_text('preserve existing settings')
+            settings=ServerSettings(folder/'data',mode='network',listen_address='203.0.113.45',server_host='central-pc')
+            with patch('server.management.settings.socket.socket') as socket_factory,patch('server.management.settings.postgres_major') as postgres,patch('server.management.runtime.subprocess.run') as run:
+                socket_factory.return_value.__enter__.return_value.bind.side_effect=OSError('not a local address')
+                with self.assertRaisesRegex(CollectorError,'not available on this server PC'):save_settings(settings,path)
+                with self.assertRaisesRegex(CollectorError,'collector PC address'):control(settings,'start')
+            postgres.assert_not_called();run.assert_not_called()
+            self.assertEqual(path.read_text(),'preserve existing settings')
+            self.assertFalse(settings.data_dir.exists())
+
+    def test_invalid_local_listener_can_still_be_loaded_for_repair(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path=Path(temporary)/'manager.json'
+            settings=ServerSettings(Path(temporary)/'data',mode='network',listen_address='203.0.113.45',server_host='central-pc')
+            path.write_text(json.dumps(settings.document()))
+            with patch('server.management.settings.socket.socket',side_effect=AssertionError('Loading settings must allow repair')):
+                self.assertEqual(load_settings(path),settings)
+
+    @unittest.skipUnless(os.name=='nt','Windows controller')
+    def test_stop_works_after_a_saved_listener_disappears(self):
+        from server.management.runtime import control
+        with tempfile.TemporaryDirectory() as temporary:
+            folder=Path(temporary)
+            (folder/'credentials.dpapi').write_bytes(b'protected-placeholder')
+            settings=ServerSettings(folder,mode='network',listen_address='203.0.113.45',server_host='central-pc')
+            with patch('server.management.settings.socket.socket',side_effect=AssertionError('Stopping must not probe the listener')),patch('server.management.settings.postgres_major',return_value=18),patch('server.management.runtime.subprocess.run',return_value=Mock(returncode=0)) as run:
+                control(settings,'stop')
+            run.assert_called_once()
+
+    def test_stopping_a_new_setup_does_not_create_a_folder_that_blocks_initialization(self):
+        from server.management.runtime import control
+        with tempfile.TemporaryDirectory() as temporary:
+            settings=ServerSettings(Path(temporary)/'new-data')
+            with patch('server.management.settings.postgres_major',return_value=18),patch('server.management.runtime.subprocess.run') as run:
+                control(settings,'stop')
+            run.assert_not_called()
+            self.assertFalse(settings.data_dir.exists())
+
     def test_modes_reject_unreachable_or_ambiguous_destinations(self):
         base=ServerSettings(Path('C:/central-server'))
         base.validate_network()

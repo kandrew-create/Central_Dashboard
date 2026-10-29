@@ -185,11 +185,13 @@ class DesktopWindowTests(unittest.TestCase):
         self.wait_idle()
         self.service.cycle.assert_called_once_with(self.config)
         self.assertIn('test success',app.collection_status.get())
+        self.assertEqual(app.status.get(),'Collection status updated.')
         app.upload_token.set('TEST_ONLY_UPLOAD_CREDENTIAL')
         app.store_upload_token()
         self.assertEqual(app.upload_token.get(),'')
         self.wait_idle()
         self.service.store_upload_token.assert_called_once_with(self.config,'TEST_ONLY_UPLOAD_CREDENTIAL')
+        self.assertEqual(app.status.get(),'Upload credential protected for this Windows account.')
 
     def test_import_server_setup_updates_saved_identity_and_clears_credential_fields(self):
         app=self.create()
@@ -205,6 +207,66 @@ class DesktopWindowTests(unittest.TestCase):
         self.assertEqual(app.password.get(),'');self.assertEqual(app.upload_token.get(),'')
         self.assertFalse(app.connected)
 
+    def test_pending_upload_fields_do_not_block_setup_import(self):
+        app=self.create()
+        app.variables['upload_enabled'].set('True')
+        self.assertFalse(app.import_button.instate(('disabled',)))
+        updated=replace(self.config,source_id='00000000-0000-0000-0000-000000000001',
+                        generation_id='00000000-0000-0000-0000-000000000002',
+                        upload_enabled=True,upload_url='https://central-pc:8443/v1/uploads')
+        self.service.import_setup.return_value=updated
+        with patch('collector.gui.filedialog.askopenfilename',return_value='setup.linker-collector'),patch('collector.gui.simpledialog.askstring',return_value='test setup password'):
+            app.import_server_setup();self.wait_idle()
+        self.service.import_setup.assert_called_once_with(self.config,'setup.linker-collector','test setup password')
+        self.service.save.assert_not_called()
+        self.assertEqual(app.saved,updated)
+
+    def test_new_setup_explains_required_save_instead_of_disabling_import(self):
+        app=self.create(saved=False)
+        self.assertFalse(app.import_button.instate(('disabled',)))
+        with patch('collector.gui.messagebox.showinfo') as info,patch('collector.gui.filedialog.askopenfilename') as choose:
+            app.import_server_setup()
+        info.assert_called_once();choose.assert_not_called()
+        self.service.import_setup.assert_not_called()
+        self.assertIn('First save the local database settings',app.status.get())
+
+    def test_unsaved_local_edits_and_database_password_are_preserved_on_import(self):
+        app=self.create()
+        app.variables['host'].set('127.0.0.1')
+        with patch('collector.gui.messagebox.showinfo') as info,patch('collector.gui.filedialog.askopenfilename') as choose:
+            app.import_server_setup()
+        info.assert_called_once();choose.assert_not_called()
+        self.service.import_setup.assert_not_called()
+        self.assertEqual(app.variables['host'].get(),'127.0.0.1')
+        app.variables['host'].set(self.config.host)
+        app.password.set('TEST-ONLY-unsaved-database-password')
+        with patch('collector.gui.messagebox.showinfo') as info:
+            app.import_server_setup()
+        info.assert_called_once()
+        self.assertIn('Store the entered database password',app.status.get())
+        self.assertEqual(app.password.get(),'TEST-ONLY-unsaved-database-password')
+
+    def test_import_remains_blocked_during_automatic_collection(self):
+        app=self.create()
+        app.auto_thread=Mock();app.auto_thread.is_alive.return_value=True
+        app._refresh_actions()
+        self.assertTrue(app.import_button.instate(('disabled',)))
+        with patch('collector.gui.filedialog.askopenfilename') as choose:app.import_server_setup()
+        choose.assert_not_called();self.service.import_setup.assert_not_called()
+        self.assertIn('Stop automatic collection',app.setup_import_status.get())
+
+    def test_protected_upload_credential_has_a_visible_status_without_showing_the_secret(self):
+        app=self.create()
+        self.assertIn('No protected upload credential',app.upload_credential_status.get())
+        self.config.upload_password_path.parent.mkdir(exist_ok=True)
+        self.config.upload_password_path.write_bytes(b'test-only-protected-marker')
+        app._refresh_actions()
+        self.assertEqual(app.upload_token.get(),'')
+        self.assertIn('Protected upload credential found',app.upload_credential_status.get())
+        app.upload_token.set('TEST-ONLY-pending-credential')
+        self.assertIn('not stored',app.upload_credential_status.get())
+        self.assertNotIn('TEST-ONLY',app.upload_credential_status.get())
+
     def test_server_connection_test_runs_in_background_without_collecting(self):
         self.config=replace(self.config,upload_url='https://central-pc:8443/v1/uploads')
         self.service.load.return_value=self.config
@@ -213,3 +275,4 @@ class DesktopWindowTests(unittest.TestCase):
         self.service.check_upload.assert_called_once_with(self.config)
         self.service.cycle.assert_not_called()
         self.assertIn('no records were uploaded',app.collection_status.get())
+        self.assertEqual(app.status.get(),app.collection_status.get())

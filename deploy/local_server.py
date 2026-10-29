@@ -4,7 +4,6 @@ Run with the project Python: python -m deploy.local_server start|status|stop.
 Secrets use current-user DPAPI; TLS trust is explicit and never installed globally.
 """
 import argparse
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import ipaddress
 import json
@@ -22,8 +21,10 @@ from psycopg.rows import dict_row
 from sqlalchemy.engine import URL
 
 from collector.secrets import load_password, restrict_access, save_password, write_private_file
+from collector.errors import CollectorError
 from server.admin import provision
 from server.management.settings import load_settings
+from server.management.postgres import external_program
 
 ROOT = Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parents[1]))
 _settings=load_settings()
@@ -59,19 +60,6 @@ def protected_write(path, content):
         stream.write(content)
 
 
-@contextmanager
-def external_program():
-    """PostgreSQL must load its own DLLs, not the launcher's temporary runtime."""
-    frozen=getattr(sys,'frozen',False)
-    if frozen:
-        import win32api
-        win32api.SetDllDirectory(None)
-    try:
-        yield
-    finally:
-        if frozen:win32api.SetDllDirectory(str(ROOT))
-
-
 def certificates():
     from server.management.tls import ensure_certificates
     ensure_certificates(LOCAL, SERVER_HOST, LISTEN_ADDRESS)
@@ -97,7 +85,7 @@ def postgres(action):
 
 def setup_database():
     from server.management.settings import ServerSettings
-    ServerSettings(LOCAL,BIN,PORT,HTTPS_PORT,MODE,LISTEN_ADDRESS,SERVER_HOST).validate_network()
+    ServerSettings(LOCAL,BIN,PORT,HTTPS_PORT,MODE,LISTEN_ADDRESS,SERVER_HOST).validate()
     LOCAL.mkdir(parents=True,exist_ok=True)
     restrict_access(LOCAL)
     credentials_path = LOCAL/'credentials.dpapi'
@@ -181,27 +169,37 @@ def start():
         for info in json.loads(processes_path.read_text()).values():
             stop_process(info)
     processes = {}
+    running = {}
     commands = {name:component_command(name) for name in ('api','worker')}
-    for name,command in commands.items():
-        env = component_environment()
-        env['INGEST_DATABASE_URL' if name=='api' else 'WORKER_DATABASE_URL'] = db_url('scada_api_login' if name=='api' else 'scada_worker_login',credentials['api' if name=='api' else 'worker'])
-        with (LOCAL/(name+'.log')).open('a') as log:
-            process = subprocess.Popen(command,cwd=WORKING_DIR,env=env,stdout=log,stderr=log,creationflags=subprocess.CREATE_NO_WINDOW)
-        processes[name] = dict(pid=process.pid,created=process_identity(process.pid))
-    processes_path.write_text(json.dumps(processes),encoding='utf-8')
-    restrict_access(processes_path)
-    import ssl
-    with httpx.Client(verify=ssl.create_default_context(cafile=str(LOCAL/'ca.pem')),trust_env=False) as client:
-        for _ in range(30):
-            try:
-                response = client.get(f'https://{HEALTH_HOST}:{HTTPS_PORT}/health',timeout=2)
-                if response.status_code == 200:
-                    print(f'HTTPS server ready at https://{SERVER_HOST}:{HTTPS_PORT}/v1/uploads ({MODE}); database isolated on loopback port {PORT}.')
-                    return
-            except httpx.HTTPError:
-                pass
-            time.sleep(0.5)
-    raise RuntimeError('Local HTTPS server did not become ready; inspect the protected API log.')
+    try:
+        for name,command in commands.items():
+            env = component_environment()
+            env['INGEST_DATABASE_URL' if name=='api' else 'WORKER_DATABASE_URL'] = db_url('scada_api_login' if name=='api' else 'scada_worker_login',credentials['api' if name=='api' else 'worker'])
+            with (LOCAL/(name+'.log')).open('a') as log:
+                process = subprocess.Popen(command,cwd=WORKING_DIR,env=env,stdout=log,stderr=log,creationflags=subprocess.CREATE_NO_WINDOW)
+            running[name]=process
+            processes[name] = dict(pid=process.pid,created=process_identity(process.pid))
+        processes_path.write_text(json.dumps(processes),encoding='utf-8')
+        restrict_access(processes_path)
+        import ssl
+        with httpx.Client(verify=ssl.create_default_context(cafile=str(LOCAL/'ca.pem')),trust_env=False) as client:
+            for _ in range(30):
+                for name,process in running.items():
+                    if process.poll() is not None:
+                        component='HTTPS API' if name=='api' else 'worker'
+                        raise CollectorError(f'The {component} exited during startup. Check the server listener address, ports and protected {name}.log.')
+                try:
+                    response = client.get(f'https://{HEALTH_HOST}:{HTTPS_PORT}/health',timeout=2)
+                    if response.status_code == 200 and response.json()=={'status':'ready'}:
+                        print(f'HTTPS server ready at https://{SERVER_HOST}:{HTTPS_PORT}/v1/uploads ({MODE}); database isolated on loopback port {PORT}.')
+                        return
+                except (httpx.HTTPError,ValueError):
+                    pass
+                time.sleep(0.5)
+        raise CollectorError('The HTTPS API did not become ready. Check its listener address, port, certificate and protected api.log.')
+    except Exception:
+        for info in processes.values():stop_process(info)
+        raise
 
 
 def main(argv=None):

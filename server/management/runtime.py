@@ -16,9 +16,11 @@ def command(component):
 
 
 def control(settings,action):
-    settings.validate()
     if action not in {'start','stop'}:
         raise CollectorError('Unsupported local server operation.')
+    settings.validate(check_listener=action=='start')
+    if action=='stop' and not any((settings.data_dir/name).exists() for name in ('credentials.dpapi','database/PG_VERSION','processes.json')):
+        return
     settings.data_dir.mkdir(parents=True,exist_ok=True)
     restrict_access(settings.data_dir)
     credentials_path=settings.data_dir/'credentials.dpapi'

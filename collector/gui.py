@@ -14,6 +14,7 @@ from collector import __version__
 from collector.desktop import DesktopService, EDITABLE_FIELDS, default_config, form_config, table_values
 from collector.errors import CollectorError
 
+SERVER_SETUP_FIELDS=frozenset(('source_id','generation_id','upload_url','upload_enabled','upload_ca_file'))
 
 class CollectorWindow:
     def __init__(self, root, config_path, service=None):
@@ -34,6 +35,8 @@ class CollectorWindow:
         self.auto_stop = threading.Event()
         self.collection_status = tk.StringVar(root, 'Collection is stopped. Configure and save settings before starting.')
         self.upload_token = tk.StringVar(root)
+        self.upload_credential_status = tk.StringVar(root)
+        self.setup_import_status = tk.StringVar(root)
         self.variables = {name: tk.StringVar(root) for name in EDITABLE_FIELDS}
         self.password = tk.StringVar(root)
         self.location = tk.StringVar(root)
@@ -55,6 +58,7 @@ class CollectorWindow:
         for variable in self.variables.values():
             variable.trace_add("write", self._form_changed)
         self.password.trace_add("write", self._password_changed)
+        self.upload_token.trace_add('write',self._upload_token_changed)
         for variable in (self.table_choice, self.after_id, self.preview_limit, self.include_users):
             variable.trace_add("write", self._preview_changed)
         self._populate(self.base)
@@ -217,6 +221,8 @@ class CollectorWindow:
         self.import_button.pack(side='left', padx=8)
         self.server_test_button = self._button(token_bar, 'Test server', self.test_server)
         self.server_test_button.pack(side='left')
+        ttk.Label(card,textvariable=self.upload_credential_status,style='Muted.TLabel',wraplength=1000).pack(anchor='w',pady=(0,4))
+        ttk.Label(card,textvariable=self.setup_import_status,style='Muted.TLabel',wraplength=1000).pack(anchor='w',pady=(0,8))
         area = ttk.Frame(card, style='Card.TFrame')
         area.pack(fill='both', expand=True)
         canvas = tk.Canvas(area, background='white', highlightthickness=0)
@@ -252,6 +258,11 @@ class CollectorWindow:
         self.collection_status.set(f"Pending batches: {result.get('pending_batches',0)} | Queue: {result.get('pending_bytes',0)} bytes | "
                                    f"Last upload: {result.get('last_successful_upload') or 'None'} | Next run on this PC: {next_text} | "
                                    f"Confirmed source time: {result.get('latest_confirmed_source_timestamp') or 'Unknown'} | Error: {result.get('latest_error') or 'None'}")
+        self.status.set('Collection status updated.')
+
+    def _collection_message(self,message):
+        self.collection_status.set(message)
+        self.status.set(message)
 
     def collect_now(self):
         if self.busy or self._is_dirty() or self.password.get():
@@ -269,10 +280,17 @@ class CollectorWindow:
         if not token or self.busy or self._is_dirty():
             return
         self._start('Protecting upload credential...', lambda: self.service.store_upload_token(self.saved, token),
-                    lambda _: self.collection_status.set('Upload credential protected for this Windows account.'))
+                    lambda _: self._collection_message('Upload credential protected for this Windows account.'))
 
     def import_server_setup(self):
-        if self.busy or self._is_dirty() or (self.auto_thread and self.auto_thread.is_alive()):
+        if self.busy or (self.auto_thread and self.auto_thread.is_alive()):
+            return
+        blocker=self._import_blocker()
+        if blocker:
+            self.status.set(blocker)
+            self.collection_status.set(blocker)
+            if self.saved is None:self.notebook.select(0)
+            messagebox.showinfo('Import server setup',blocker,parent=self.root)
             return
         path = filedialog.askopenfilename(parent=self.root, title='Import encrypted Central Server setup',
                     filetypes=(('Encrypted collector setup', '*.linker-collector'),))
@@ -297,7 +315,7 @@ class CollectorWindow:
         if self.busy or self._is_dirty() or self.upload_token.get():return
         config=self.saved
         self._start('Testing HTTPS, upload credential and source registration...',lambda:self.service.check_upload(config),
-                    lambda result:self.collection_status.set('Server connection verified: '+result['upload_url']+'. Credential and active source/generation accepted; no records were uploaded.'))
+                    lambda result:self._collection_message('Server connection verified: '+result['upload_url']+'. Credential and active source/generation accepted; no records were uploaded.'))
 
     def start_auto(self):
         if self.busy or self._is_dirty() or not self.saved.collection_enabled or (self.auto_thread and self.auto_thread.is_alive()):
@@ -380,6 +398,15 @@ class CollectorWindow:
         return self.saved is None or any(self.variables[name].get() != str(getattr(self.saved, name))
                                          for name in EDITABLE_FIELDS)
 
+    def _import_blocker(self):
+        if self.saved is None:
+            return 'First save the local database settings. Keep Enable uploads set to False until importing the server setup.'
+        if self.password.get():
+            return 'Store the entered database password before importing the server setup.'
+        if any(self.variables[name].get()!=str(getattr(self.saved,name)) for name in EDITABLE_FIELDS if name not in SERVER_SETUP_FIELDS):
+            return 'Save local database, collection and schedule edits before importing. If the HTTPS URL is blank, keep Enable uploads set to False until import.'
+        return None
+
     def _refresh_actions(self):
         for control, state in self.controls:
             control.configure(state="disabled" if self.busy else state)
@@ -396,9 +423,17 @@ class CollectorWindow:
         self.auto_button.configure(state='normal' if saved and self.saved.collection_enabled and not self.busy and not running else 'disabled')
         self.stop_button.configure(state='normal' if running else 'disabled')
         self.token_button.configure(state='normal' if saved and not self.busy else 'disabled')
-        self.import_button.configure(state='normal' if saved and not self.busy and not running else 'disabled')
-        self.server_test_button.configure(state='normal' if saved and not self.busy and self.saved.upload_url else 'disabled')
+        self.import_button.configure(state='normal' if not self.busy and not running else 'disabled')
+        self.server_test_button.configure(state='normal' if saved and not self.busy and self.saved.upload_url and not self.upload_token.get() else 'disabled')
         self.collection_save_button.configure(state='normal' if not self.busy and self._is_dirty() else 'disabled')
+        if self.upload_token.get():
+            self.upload_credential_status.set('New upload credential entered but not stored. Importing server setup supplies this credential automatically.')
+        elif self.saved is not None and self.saved.upload_password_path.is_file():
+            self.upload_credential_status.set('Protected upload credential found. The entry stays blank; use Test server to verify it.')
+        else:
+            self.upload_credential_status.set('No protected upload credential stored. Import server setup to configure it.')
+        self.setup_import_status.set('Stop automatic collection before importing server setup.' if running else
+                                     self._import_blocker() or 'Ready to import server setup. The file supplies the HTTPS address, source IDs and upload credential.')
 
     def _clear_preview(self):
         self.records.clear()
@@ -438,6 +473,9 @@ class CollectorWindow:
             available = self.saved is not None and self.saved.password_path.is_file()
             self.password_status.set("Saved password available" if available else "No saved password")
         self._refresh_actions()
+
+    def _upload_token_changed(self,*_args):
+        if not self.loading:self._refresh_actions()
 
     def _start(self, label, work, done):
         if self.busy:

@@ -35,6 +35,18 @@ class ManagementIntegrationTests(PostgresCase):
     def register(self,**kwargs):
         return self.service.register('SCADA PC',customer_name='Customer',site_name='Site',project_name='Project',machine_tag='M-1',**kwargs)
 
+    def test_registration_accepts_pasted_project_and_preserves_existing_registry_on_invalid_names(self):
+        result=self.service.register('SCADA PC',customer_name='Customer',site_name='Site',
+                                     project_name='High Temperature\r\nProcessing Line\t',machine_tag='M-1')
+        with self.service.connection() as db:
+            project=db.execute('SELECT name FROM platform.projects WHERE project_id=%s',(result['project_id'],)).fetchone()['name']
+            before=db.execute('SELECT count(*) n FROM platform.customers').fetchone()['n']
+        self.assertEqual(project,'High Temperature Processing Line')
+        with self.assertRaisesRegex(CollectorError,'unsupported control character'):
+            self.service.register('Second PC',customer_name='Customer',site_name='Site',project_name='Project\x00Name',machine_tag='M-2')
+        with self.service.connection() as db:
+            self.assertEqual(db.execute('SELECT count(*) n FROM platform.customers').fetchone()['n'],before)
+
     def test_registry_reuse_scope_vault_export_and_rotation(self):
         first=self.register()
         reused=self.register(customer_id=first['customer_id'],site_id=first['site_id'],project_id=first['project_id'],machine_id=first['machine_id'])

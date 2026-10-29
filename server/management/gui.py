@@ -8,7 +8,7 @@ from tkinter import ttk,filedialog,messagebox
 
 from collector import __version__
 from collector.errors import CollectorError
-from server.management.service import ManagerService
+from server.management.service import ManagerService,text
 from server.management.settings import ServerSettings,load_settings,save_settings
 
 NEW='<Create new>'
@@ -113,10 +113,11 @@ class ManagerWindow:
         box=ttk.Combobox(grid,textvariable=self.mode,values=tuple(MODES),state='readonly')
         box.grid(row=0,column=1,sticky='ew',pady=5);box.bind('<<ComboboxSelected>>',self._mode_changed)
         self.controls.append((box,'readonly'))
-        for row,(title,var) in enumerate((('HTTPS listen IPv4 address',self.listen_address),('Central PC hostname / IPv4',self.server_host),('HTTPS port',self.https_port),('Server data folder',self.data_dir),('PostgreSQL 17 bin folder',self.postgres_bin),('Central database port (this PC only)',self.database_port)),start=1):
+        for row,(title,var) in enumerate((('HTTPS listen IPv4 address',self.listen_address),('Central PC hostname / IPv4',self.server_host),('HTTPS port',self.https_port),('Server data folder',self.data_dir),('PostgreSQL 17 or 18 bin folder',self.postgres_bin),('Central database port (this PC only)',self.database_port)),start=1):
             ttk.Label(grid,text=title,style='Card.TLabel').grid(row=row,column=0,sticky='w',padx=(0,14),pady=5)
             entry=ttk.Entry(grid,textvariable=var);entry.grid(row=row,column=1,sticky='ew',pady=5)
             self.controls.append((entry,'normal'))
+        ttk.Label(card,text='HTTPS listen address belongs to this server PC. The collector PC IP is not required here; collectors connect outward using the exported setup.',style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=6)
         ttk.Label(card,textvariable=self.url_preview,style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=10)
         self.button(card,'Save server settings',self.save_locations).pack(anchor='w',pady=8)
         ttk.Label(card,text='Stop the server before changing these settings, save, then start it. HTTPS certificates are generated for the saved hostname/IP. Export a fresh collector setup after changing the destination.',style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=6)
@@ -251,7 +252,7 @@ class ManagerWindow:
             self.root.destroy();return
         self.poll_id=self.root.after(80,self._poll)
 
-    def _show(self,result):
+    def _show(self,result,success_message=None):
         status=result['status']
         self.health_text.set(f"HTTPS API: {'Ready' if status['api_ready'] else 'Stopped'}   |   PostgreSQL: {'Ready' if status['database_ready'] else 'Stopped'}   |   Worker: {'Running' if status['worker_running'] else 'Stopped'}")
         self.metrics.set(f"Sources: {status['sources']}   Received batches: {status['batches']}   Stored revisions: {status['revisions']}   Quarantined batches: {status['quarantined_batches']}   Failed jobs: {status['failed_jobs']}")
@@ -267,13 +268,14 @@ class ManagerWindow:
         for key,row in self.source_rows.items():
             self.tree.insert('', 'end', iid=key,values=(row['name'],row['customer_name'],row['site_name'],row['project_name'],key,str(row['generation_id'] or ''),str(row['last_received'] or 'No uploads'),row['quarantined_batches']))
         if selected and selected[0] in self.source_rows:self.tree.selection_set(selected[0])
-        self.status_text.set(status['error'] or 'Central Server status refreshed.')
+        self.status_text.set(success_message or status['error'] or 'Central Server status refreshed.')
 
-    def refresh(self):
+    def refresh(self,success_message=None):
         def work():
             status=self.service.status()
             return dict(status=status,catalog=self.service.catalog() if status['database_ready'] else {k:[] for k in self.registry},sources=self.service.sources() if status['database_ready'] else [])
-        self._start('Reading server health and registered sources...',work,self._show)
+        self._start(success_message or 'Reading server health and registered sources...',work,
+                    lambda result:self._show(result,success_message))
 
     def _started(self,_):
         self.refresh()
@@ -287,13 +289,11 @@ class ManagerWindow:
         if self.busy:return
         try:
             settings=self._form_settings()
-            settings.validate()
         except (ValueError,CollectorError) as error:
             messagebox.showerror('Server settings',str(error),parent=self.root);return
         def saved(_):
             self.service=ManagerService(settings)
-            self.status_text.set('Server locations saved. Start the selected server when ready.')
-            self.refresh()
+            self.refresh('Server settings saved successfully.')
         def persist():
             if settings != self.service.settings:
                 status=self.service.status()
@@ -304,11 +304,21 @@ class ManagerWindow:
 
     def register_source(self):
         if self.busy:return
-        values=dict(source_name=self.names['source'].get(),customer_name=self.names['customer'].get(),site_name=self.names['site'].get(),
-                    project_name=self.names['project'].get(),machine_tag=self.names['machine'].get())
-        for name in self.choices:
-            row=self._chosen(name)
-            values[name+'_id']=row[name+'_id'] if row else None
+        values={}
+        try:
+            for name,key,label in (('customer','customer_name','customer name'),('site','site_name','site name'),
+                                   ('project','project_name','project name'),('machine','machine_tag','machine tag'),
+                                   ('source','source_name','SCADA PC/database source name')):
+                row=self._chosen(name) if name!='source' else None
+                if name!='source':values[name+'_id']=row[name+'_id'] if row else None
+                values[key]=self.names[name].get()
+                if row is None:
+                    values[key]=text(values[key],label)
+                    self.names[name].set(values[key])
+        except CollectorError as error:
+            self.status_text.set(str(error))
+            messagebox.showerror('Registration settings',str(error),parent=self.root)
+            return
         def registered(result):
             self.names['source'].set('')
             self.notebook.select(2)

@@ -14,10 +14,33 @@ OutputBaseFilename=Linker-Central-Server-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+CloseApplications=force
+CloseApplicationsFilter=central-server.exe
+RestartApplications=no
 UninstallDisplayIcon={app}\central-server.exe
 [Files]
 Source: "..\..\dist\central-server\central-server.exe"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{group}\Central Server"; Filename: "{app}\central-server.exe"; WorkingDir: "{app}"
-// PostgreSQL 17 is a prerequisite. Data, settings and credentials are retained
-// on uninstall. Stop the managed server before updating or uninstalling.
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ServerExe: String;
+  ResultCode: Integer;
+begin
+  Result := '';
+  ServerExe := ExpandConstant('{app}\central-server.exe');
+  if FileExists(ServerExe) and
+     FileExists(ExpandConstant('{commonappdata}\Linker\CentralServer\manager.json')) then
+  begin
+    Log('Stopping the configured Central Server before replacing application files.');
+    if not Exec(ServerExe, '--component stop', ExpandConstant('{app}'),
+                SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      Result := 'Cannot stop Central Server. Close the server and run Setup again using the Windows account that manages it.'
+    else if ResultCode <> 0 then
+      Result := 'Central Server could not stop safely. Open Central Server, choose Stop server, and resolve the error before retrying Setup.';
+  end;
+end;
+// PostgreSQL 17 or 18 is a prerequisite. Data, settings and credentials are retained
+// on uninstall. Setup stops the configured server before closing remaining app
+// processes. Stop the managed server manually before uninstalling.
