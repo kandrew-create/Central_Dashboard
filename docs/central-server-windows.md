@@ -23,6 +23,14 @@ For a source checkout, install dependencies with `uv pip install -e ".[collector
 
 ## Set up this PC
 
+Central Server 0.5 adds **5 Local AI** for equipment identification. AI suggests names from alarm messages/tags only. Version 0.5.1 uses the machine tag entered in **Register SCADA source** directly for events, without interpreting event messages or `ev_source`. Migrations `0004_machine_interpretation` and `0005_registered_event_machine` queue existing records and correct earlier event identifications in Central storage. Follow [X3 setup](release-X3.md); original revisions and machine approval remain separate.
+
+In 0.5.2, use **5 Local AI → Refresh interpretations**, then select a row to compare its equipment name with the **Original message** panel below. Alarm conditions are excluded from names: `Conveyor VFD Connect Error` identifies `Conveyor VFD`. Earlier alarm suggestions are rechecked by `0006_alarm_names_v2`; native logs and registered event tags are preserved. Suggestions require review; the mapping-review count is separate from runtime or collection errors.
+
+The updated Central Server window has a bottom status bar on every tab, with the current action/result, application version and an animated activity indicator while work is running. The indicator stops after success or failure; the result message stays visible. It indicates activity rather than a percentage complete. Use a newly rebuilt package for this UI update; published X2 assets are unchanged.
+
+The updated status labels say **Saved record versions** and **Batches awaiting machine mapping**. The first saved copy of each alarm or event counts as one version: 9 alarms and 1 event initially means 10 versions. Recollecting unchanged content adds nothing; distinct changed content can add a version. Awaiting machine mapping means that the records are already received and saved, but need an approved assignment to a registered machine. The source list calls this **Awaiting mapping**. These are display labels; the existing collection, revision storage, quarantine rules and SQL names (`alarm_event_revisions`, `mapping_status`, `processing_status='quarantined'`) remain the same.
+
 1. Open **1 Server status** and use **Initialize / start server** if stopped. A ready installation reports HTTPS API Ready, PostgreSQL Ready and Worker Running. Default ports are 8443 and 55441. The first start of a new data folder initializes a separate SCRAM-authenticated PostgreSQL database, applies migrations, creates restricted runtime logins and creates local TLS certificates.
 2. Open **3 Sources & collector setup** and select your registered SCADA source. If none exists, register it in tab 2 first. Reuse existing source IDs and data instead of registering the same source again. Older commissioning setups may already have a source named `LOCAL-SCADA`.
 3. Choose **Export encrypted collector setup**. Select a new filename and a password of at least 12 characters. Keep the file password separate from the file.
@@ -73,6 +81,16 @@ Both the server and collector must be updated to 0.4 for **Test server**; an old
 
 New registrations have a draft mapping. Received raw alarm/event data remains quarantined until an authorized exact machine mapping is approved and the batches are reprocessed. The existing administration commands cover mapping approval, generation recovery, credential revocation and reprocessing; see [operations](operations.md). The setup window does not approve mappings automatically. The Web Portal and customer reporting remain later work.
 
+## Connect across networks using Tailscale
+
+The existing Network server mode can use Tailscale IPv4 addresses. Install/connect Tailscale on the Central and Collector PCs in the approved tailnet, then allow the intended Collector devices to reach the Central PC's HTTPS TCP port (normally 8443) in both the tailnet policy and Windows Firewall. No PostgreSQL access across the VPN is required. See [Tailscale device connections](https://tailscale.com/docs/how-to/connect-to-devices).
+
+Stop Central Server before changing addresses. In **4 Connection & mode**, choose **Network server** and set **Central PC hostname / IPv4** to the Central PC's Tailscale IPv4, for example `100.80.20.10`. Set **HTTPS listen IPv4** to that same address only when it is assigned to this Central PC, or use `0.0.0.0` with appropriately restricted firewall access. Save and restart. The generated HTTPS certificate must match the advertised address.
+
+Export a fresh encrypted setup for each existing source and import it on its Collector so URL and trust settings match. Reuse its existing IDs; moving to another network does not require a new registration. Other Collectors using an old advertised address also need the updated setup. Use **Test server**, then a bounded **Collect now** from each intended remote PC. Keep Tailscale available for scheduled uploads; interrupted deliveries retain their unconfirmed local batches subject to configured queue/resource limits.
+
+This configuration follows the application's supported IPv4/HTTPS path. An actual second-PC Tailscale connection has not been commissioned in the local release checks; route, firewall, device authorization and uninterrupted scheduled operation require destination-PC verification.
+
 ## If Initialize / start server takes a long time
 
 Check `api.log` in the configured server data folder. A bind error means the HTTPS listener could not start. In Network mode, **HTTPS listen IPv4 address** must be an address assigned to this server PC, or `0.0.0.0` for all IPv4 adapters. Do not enter the collector PC's address. **Central PC hostname / IPv4** is the address collectors use to reach this server. Older builds can continue waiting after the API has exited. The current build rejects unavailable listener addresses before save/start and detects API or worker exits during startup. Failed starts clean up the new API/worker processes while retaining the database and credentials for recovery.
@@ -84,6 +102,8 @@ Stopping the server still works when an adapter address has disappeared. Stoppin
 In the current rebuilt manager, a successful save keeps **Server settings saved successfully.** in the footer after its automatic status refresh. The Server status tab separately shows whether PostgreSQL/API/worker are stopped. A stopped database does not mean that saving failed. Actual save failures retain their error message; manually refreshing status still reports any health error.
 
 ## Storage and credentials
+
+For routine pgAdmin browsing in 0.6.1, use **Schemas → your registered SCADA PC/source name → Tables → alarmhistory / eventhistory**. Each registered source gets its own schema named from its label; select the source in the manager to see its SQL schema. A schema restriction hides internal tables in this connection while preserving data. Add subsequent source schemas to the restriction as needed. See [simple pgAdmin browsing](pgadmin-browsing.md) and [storage details](source-table-layout.md).
 
 New setups detect a complete PostgreSQL installation under `%ProgramFiles%\PostgreSQL`, preferring 18 and falling back to 17. In **4 Connection & mode**, set **PostgreSQL 17 or 18 bin folder** to the installation's `bin` directory (for example `C:\Program Files\PostgreSQL\18\bin`). Save settings before starting. Custom installation paths can be entered manually. Saved paths are preserved.
 

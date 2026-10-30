@@ -1,5 +1,6 @@
 from pathlib import Path
 import tempfile
+import threading
 import time
 import tkinter as tk
 import unittest
@@ -62,6 +63,7 @@ class ManagerWindowTests(unittest.TestCase):
         self.service.start.return_value=self.status
         self.service.catalog.return_value={k:[] for k in ('customers','sites','projects','machines')}
         self.service.sources.return_value=[]
+        self.service.machine_interpretations.return_value=dict(configuration=dict(enabled=True,model='qwen3:4b'),rows=[])
         self.app=ManagerWindow(self.root,self.service)
         self.addCleanup(self.destroy)
         self.wait_idle()
@@ -82,6 +84,70 @@ class ManagerWindowTests(unittest.TestCase):
         with patch('server.management.gui.messagebox.askyesno',return_value=True):self.app.stop_server()
         self.wait_idle();self.service.stop.assert_called_once_with()
         self.assertIn('Ready',self.app.health_text.get())
+
+    def test_local_ai_enable_refreshes_suggestions_without_starting_or_remapping_server(self):
+        self.service.machine_interpretations.return_value['rows']=[dict(source_name='Fixture SCADA',
+            source_table='alarmhistory',source_record_id=1,status='suggested',
+            candidates=[dict(label='Oven 1',field='al_message')],model='qwen3:4b')]
+        self.app.enable_machine_ai();self.wait_idle()
+        self.service.enable_machine_ai.assert_called_once_with('qwen3:4b')
+        self.assertIn('Enabled',self.app.ai_status.get())
+        self.assertIn('Oven 1',str(self.app.ai_tree.item(self.app.ai_tree.get_children()[0],'values')))
+        self.service.start.assert_not_called()
+        self.service.register.assert_not_called()
+
+    def test_local_ai_configuration_failure_preserves_saved_record_totals(self):
+        self.service.enable_machine_ai.side_effect=CollectorError('Local model is not installed.')
+        before=self.app.metrics.get()
+        with patch('server.management.gui.messagebox.showerror') as error:
+            self.app.enable_machine_ai();self.wait_idle()
+        error.assert_called_once()
+        self.assertEqual(self.app.metrics.get(),before)
+        self.assertEqual(self.app.status_text.get(),'Local model is not installed.')
+
+    def test_selected_identification_displays_original_message_for_comparison(self):
+        self.service.machine_interpretations.return_value['rows']=[dict(source_name='Fixture source',
+            source_table='alarmhistory',source_record_id=1,status='suggested',original_message='Conveyor VFD Connect Error',
+            candidates=[dict(label='Conveyor VFD',field='al_message')],model='qwen3:4b')]
+        self.app.refresh_machine_ai();self.wait_idle()
+        self.app.ai_tree.selection_set(self.app.ai_tree.get_children()[0]);self.app.show_ai_evidence()
+        self.assertEqual(self.app.ai_evidence.get('1.0','end').strip(),'Conveyor VFD Connect Error')
+        self.assertEqual(str(self.app.ai_evidence['state']),'disabled')
+
+    def test_footer_shows_activity_until_background_work_succeeds_or_fails(self):
+        for failure in (False,True):
+            with self.subTest(failure=failure):
+                started,release=threading.Event(),threading.Event()
+                self.addCleanup(release.set)
+                threads=[]
+                def work():
+                    threads.append(threading.get_ident())
+                    started.set();release.wait(3)
+                    if failure:raise CollectorError('Test operation failed.')
+                    return 'Test operation completed.'
+                self.app._start('Working...',work,self.app.status_text.set)
+                self.assertTrue(started.wait(1))
+                self.assertNotEqual(threads[0],threading.get_ident())
+                self.assertEqual(str(self.app.progress['mode']),'indeterminate')
+                self.assertEqual(self.app.status_text.get(),'Working...')
+                self.root.update()
+                release.set()
+                with patch('server.management.gui.messagebox.showerror') as error:self.wait_idle()
+                self.assertEqual(str(self.app.progress['mode']),'determinate')
+                self.assertEqual(float(self.app.progress['value']),0)
+                self.assertEqual(self.app.status_text.get(),'Test operation failed.' if failure else 'Test operation completed.')
+                self.assertEqual(error.call_count,int(failure))
+
+    def test_footer_remains_visible_on_every_tab_at_minimum_window_size(self):
+        self.root.geometry('1080x750');self.root.deiconify()
+        self.app.status_text.set('A long operation result with details. '*20)
+        for tab in self.app.notebook.tabs():
+            self.app.notebook.select(tab);self.root.update()
+            self.assertTrue(self.app.footer.winfo_ismapped())
+            self.assertTrue(self.app.progress.winfo_ismapped())
+            self.assertGreater(self.app.progress.winfo_width(),0)
+            self.assertLessEqual(self.app.footer.winfo_y()+self.app.footer.winfo_height(),self.root.winfo_height())
+            self.assertLessEqual(self.app.progress.winfo_rootx()+self.app.progress.winfo_width(),self.root.winfo_rootx()+self.root.winfo_width())
 
     def select_source(self):
         row=dict(source_id=uuid4(),name='Network SCADA PC',customer_name='Customer',site_name='Site',project_name='Project',

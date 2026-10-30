@@ -1,6 +1,6 @@
-# SCADA Collector 0.4 — revision X2
+# SCADA Collector 0.4 — revision X3
 
-[Download the X2 SCADA Collector installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X2/Linker-SCADA-Collector-Setup.exe). [Release notes and checksums](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X2).
+[Download the X3 SCADA Collector installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X3/Linker-SCADA-Collector-Setup.exe). [Release notes and checksums](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X3).
 
 The native Windows GUI and CLI provide protected connection setup, bounded previews, automatic collection, durable staging, confirmed delivery and status. A native Windows service wrapper and installer are included. Installation, startup under a dedicated account, and representative customer commissioning still require separate verification.
 

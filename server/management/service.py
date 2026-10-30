@@ -51,6 +51,30 @@ def text(value,label):
 
 
 class ManagerService:
+    @operation
+    def enable_machine_ai(self, model):
+        from server.machine_ai import LocalModel, save_configuration
+        LocalModel(model).check()
+        return save_configuration(self.settings.data_dir, model, True)
+
+    @operation
+    def disable_machine_ai(self):
+        from server.machine_ai import configuration, save_configuration
+        config = configuration(self.settings.data_dir)
+        return save_configuration(self.settings.data_dir, config['model'], False)
+
+    @operation
+    def machine_interpretations(self):
+        from server.machine_ai import configuration
+        config = configuration(self.settings.data_dir)
+        with self.connection() as db:
+            rows = db.execute('''SELECT i.source_record_id,i.source_table,i.status,i.candidates,i.model,i.policy_version,
+                s.name source_name,r.message original_message FROM platform.machine_interpretations i
+                JOIN platform.sources s USING(source_id)
+                JOIN platform.alarm_event_revisions r ON r.revision_id=i.revision_id
+                ORDER BY i.interpreted_at DESC NULLS LAST,i.revision_id LIMIT 200''').fetchall()
+        return dict(configuration=config, rows=rows)
+
     def __init__(self,settings=None,connection_factory=None):
         self.settings=settings or load_settings()
         self.connection_factory=connection_factory
@@ -128,13 +152,14 @@ class ManagerService:
     def sources(self):
         with self.connection() as db:
             return db.execute('''SELECT s.*,c.name customer_name,si.name site_name,p.name project_name,g.generation_id,
-                g.generation_number,
+                g.generation_number,storage.schema_name storage_schema,
                 (SELECT max(received_at) FROM platform.upload_batches b WHERE b.source_id=s.source_id) last_received,
                 (SELECT count(*) FROM platform.upload_batches b WHERE b.source_id=s.source_id AND b.processing_status='quarantined') quarantined_batches,
                 (SELECT count(*) FROM platform.upload_batches b WHERE b.source_id=s.source_id AND b.processing_status='failed') failed_batches
                 FROM platform.sources s JOIN platform.customers c USING(customer_id)
                 JOIN platform.sites si ON si.site_id=s.site_id JOIN platform.projects p ON p.project_id=s.project_id
                 LEFT JOIN platform.source_generations g ON g.source_id=s.source_id AND g.retired_at IS NULL
+                LEFT JOIN platform.source_storage storage ON storage.source_id=s.source_id
                 WHERE s.deleted_at IS NULL
                 ORDER BY s.name,s.source_id LIMIT 1000''').fetchall()
 

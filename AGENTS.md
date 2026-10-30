@@ -63,7 +63,7 @@ Build Windows packages with PyInstaller and Inno Setup 6 installed:
 
 Both scripts accept `-Compiler` for a non-default Inno Setup compiler location. Collector executables go to `dist/collector`, Central Server to `dist/central-server`, and installers to `dist/installer`.
 
-Current download links target repository revision X2; application package version remains 0.4.0. Publish installers and their matching SHA-256 sidecars as GitHub Release assets, with release notes and verification links. Keep earlier release assets and local operational state intact.
+Current download links target revision X3: Central Server 0.6.1 with equipment identification and source-named alarm/event tables; Collector remains 0.4.0 with upload protocol v1. Publish installers and matching SHA-256 sidecars with release notes and verification links. Preserve earlier releases and local operational state. Tailscale uses the supported Network mode/HTTPS path; verify connectivity on each actual remote PC before describing it as commissioned.
 
 Central Server upgrades must stop the configured server before replacing files and preserve operational state. The installer uses the installed stop command before Restart Manager closes remaining processes; stop errors block the upgrade. Do not replace this with process-name-wide termination or stop an unrelated PostgreSQL service. Both Windows builds refresh SHA-256 sidecars for their executables and installer.
 
@@ -72,6 +72,10 @@ For Network mode startup faults, verify that the saved listener is assigned to t
 Validate local listener availability before saving or starting, but never require it for loading/repairing settings or stopping the server. Failed starts must clean up their own newly launched API/worker components, retain data/credentials, and fail when either component exits. A stop on a never-initialized setup must not create state that blocks initialization.
 
 Keep settings-save confirmation separate from server readiness: a post-save refresh must not overwrite successful persistence with an expected stopped-database message. Actual save errors and explicit status-refresh errors must still be shown.
+
+Keep the Central Server bottom status bar visible across tabs and at minimum window size. Animate its activity indicator during background work, stop it on success or failure, and retain the final message, including settings-save confirmation after refresh.
+
+Central Server labels use "Saved record versions" (including first copies) and "Batches awaiting machine mapping" (data already saved). Local AI interprets alarms only and must separate equipment from alarm conditions: "Conveyor VFD Connect Error" identifies "Conveyor VFD". A literal text match alone does not establish a correct equipment name. Show original-message evidence and leave unverified/condition-only labels uncertain. Events use the machine tag selected in Register SCADA source, constrained by the accepted upload scope; never infer events from messages or `ev_source`. Store results separately from native revisions and retain mapping approval. Apply identification migrations `0004`–`0006` only to Central storage.
 
 Registration names are single-line labels: trim surrounding whitespace and fold pasted CR/LF/tab separators to spaces before enforcing the 1–255 character limit. Distinguish empty, overlength and unsupported-control-character errors. Validate new registration names before database work and preserve existing-item reuse and transaction rollback.
 
@@ -87,6 +91,7 @@ docker compose --env-file .env.example -f deploy/docker-compose.yml config --qui
 
 ## Working conventions
 
+- Central Server 0.6.1 uses registered SCADA PC/source names for its two managed physical native tables (`alarmhistory`, `eventhistory`). Migration `0009_source_schema_names` renames existing schemas in place; preserve table OIDs, native values, permissions, replay and revision behavior. Quote identifiers; shorten at UTF-8 boundaries and disambiguate collisions without merging sources. Runtime roles must never inherit the private storage owner. Update pgAdmin schema restrictions after a rename. Apply migrations only to Central storage. See [source storage](docs/source-table-layout.md).
 - Preserve unrelated working-tree changes and keep edits scoped to the requested task.
 - Follow existing Python, Tk, SQL, and PowerShell patterns. Keep database, network, and process work off the GUI thread.
 - Run checks appropriate to the change. For protocol, ingestion, database, or queue changes, include the relevant disposable PostgreSQL tests. State what ran, what skipped, and what remains unverified.
@@ -98,4 +103,4 @@ docker compose --env-file .env.example -f deploy/docker-compose.yml config --qui
 
 ## Latest project change
 
-2026-10-30: Added [confirmed source deletion](docs/source-deletion-verification-2026-10-30.md) with migration `0003_source_deletion` and clarified Network mode for [multiple collector PCs](docs/network-mode-implementation-2026-10-28.md#2026-10-30-multiple-collector-wording). PostgreSQL 17/18 suites and 25 GUI/network checks passed. Packages were rebuilt; source deletion is installed, but the wording-only installation was canceled. Included removal of the locally deleted tracked setup export; other exports remain ignored. Published X2 assets are unchanged.
+2026-10-30: Prepared revision X3 with Central Server 0.6.1 and Collector 0.4.0, updated download links and documented Tailscale commissioning. Includes the status bar, clearer revision/mapping labels, local alarm suggestions, registered event tags and source-named native tables. Installed Central data, identities, native fields and credentials passed preservation checks. PostgreSQL 17: 239 passed/two desktop skips; 18: 240 passed/one desktop skip; all three distinct skips passed on rerun. See [X3 release and verification](docs/release-X3.md). Runtime data, credentials, protected setups and local backups remain excluded; earlier releases are retained.

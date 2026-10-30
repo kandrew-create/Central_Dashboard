@@ -1,15 +1,15 @@
 # SCADA Collector and Central Server
 
-Repository revision: **X2**. Application package version: **0.4.0**.
+Published revision: **X3** — Central Server **0.6.1** and SCADA Collector **0.4.0**. This revision adds local alarm equipment identification, registered event tags and two native tables per registered source. See [X3 release notes and verification](docs/release-X3.md).
 
-Download ready-to-install Windows packages from the [X2 release](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X2). SHA-256 checksum files are included with the downloads. See the [X2 release notes](docs/release-X2.md) for the fixes and verification evidence.
+Download Windows packages and matching SHA-256 checksum files from the [X3 release](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X3). Earlier [X2 packages](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X2) remain available. See the [X3 release notes](docs/release-X3.md) for setup and verification evidence.
 
 This repository contains two applications with separate Windows installers:
 
 | Application | Source and guide | Installed on | Installer |
 |---|---|---|---|
-| SCADA Collector | [collector/](collector/README.md) | SCADA PC | [Download installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X2/Linker-SCADA-Collector-Setup.exe) |
-| Central Server | [server/](server/README.md) | Central server PC; same PC for local tests | [Download installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X2/Linker-Central-Server-Setup.exe) |
+| SCADA Collector | [collector/](collector/README.md) | SCADA PC | [Download installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X3/Linker-SCADA-Collector-Setup.exe) |
+| Central Server | [server/](server/README.md) | Central server PC; same PC for local tests | [Download installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X3/Linker-Central-Server-Setup.exe) |
 
 `shared/` contains the common upload protocol and encrypted setup-file format. `deploy/` contains deployment and build scripts; `docs/` contains specifications and operating guides. Keeping the applications in one repository lets changes to their shared interface be reviewed together. Each PC installs only its required application.
 

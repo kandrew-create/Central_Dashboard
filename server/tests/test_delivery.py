@@ -37,6 +37,11 @@ class DeliveryIntegrationTests(PostgresCase):
         super().setUpClass()
         cls._run((ROOT/'server/migrations/sql/0002_runtime.sql').read_text(encoding='utf-8'))
         cls._run((ROOT/'server/migrations/sql/0003_source_deletion.sql').read_text(encoding='utf-8'))
+        cls._run((ROOT/'server/migrations/sql/0004_machine_interpretation.sql').read_text(encoding='utf-8'))
+        cls._run((ROOT/'server/migrations/sql/0005_registered_event_machine.sql').read_text(encoding='utf-8'))
+        cls._run((ROOT/'server/migrations/sql/0007_log_browsing_views.sql').read_text(encoding='utf-8'))
+        cls._run((ROOT/'server/migrations/sql/0008_source_tables.sql').read_text(encoding='utf-8'))
+        cls._run((ROOT/'server/migrations/sql/0009_source_schema_names.sql').read_text(encoding='utf-8'))
         cls.roles = ['api_'+uuid4().hex,'worker_'+uuid4().hex,'source_'+uuid4().hex]
         for role,capability in zip(cls.roles[:2],('scada_ingest','scada_worker')):
             cls._run(f'CREATE ROLE "{role}" LOGIN; GRANT {capability} TO "{role}";')
@@ -59,6 +64,11 @@ class DeliveryIntegrationTests(PostgresCase):
             cls._run(f'DROP ROLE "{role}";',database=cls.base_database)
 
     def setUp(self):
+        self._run('''DO $$ DECLARE item record; BEGIN
+            FOR item IN SELECT schema_name FROM platform.source_storage LOOP
+                EXECUTE format('DROP SCHEMA %I CASCADE',item.schema_name);
+            END LOOP;
+        END $$;''')
         self._run('TRUNCATE platform.customers CASCADE; TRUNCATE public.alarmhistory,public.eventhistory RESTART IDENTITY;'+seed_sql())
         self.token = 'test-only-'+uuid4().hex+uuid4().hex
         verifier = hashlib.sha256(self.token.encode()).hexdigest()
@@ -80,6 +90,127 @@ class DeliveryIntegrationTests(PostgresCase):
     def scalar(self,query):
         return self._run(query).stdout.strip().splitlines()[-1]
 
+    def native_schema(self,source=None):
+        schema=self.scalar("SELECT schema_name FROM platform.source_storage WHERE source_id='"+(source or uid(6))+"'")
+        self.assertRegex(schema,r'^Source(?:_[0-9a-f]+)?$')
+        return schema
+
+    def test_source_label_rename_keeps_table_identity_history_and_replay(self):
+        batch=self.batch(wire(al_message='Conveyor VFD Connect Error'))
+        self.assertEqual(self.post(batch).status_code,200)
+        self.assertTrue(work_once(self.worker))
+        oid=self.scalar("SELECT '\"Source\".alarmhistory'::regclass::oid")
+        fingerprint=self.scalar('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions')
+        self._run(f"UPDATE platform.sources SET name='Oven Line SCADA' WHERE source_id='{uid(6)}'")
+        self.assertEqual(self.scalar(f"SELECT schema_name FROM platform.source_storage WHERE source_id='{uid(6)}'"),'Oven Line SCADA')
+        self.assertEqual(self.scalar("SELECT '\"Oven Line SCADA\".alarmhistory'::regclass::oid"),oid)
+        self.assertEqual(self.post(batch).status_code,200)
+        self.assertEqual(self.scalar('SELECT count(*) FROM "Oven Line SCADA".alarmhistory'),'1')
+        self.assertEqual(self.scalar('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions'),fingerprint)
+
+    def test_source_schema_has_two_real_native_tables_and_replay_adds_no_duplicate_rows(self):
+        schema=self.native_schema()
+        self.assertEqual(self.scalar(f"SELECT string_agg(relname||':'||relkind::text,',' ORDER BY relname) FROM pg_class WHERE relnamespace='\"{schema}\"'::regnamespace AND relkind IN ('r','v','m','p')"),'alarmhistory:r,eventhistory:r')
+        alarm=wire(al_message='Conveyor VFD Connect Error',al_tag_value='001.20')
+        batch=self.batch(alarm)
+        self.assertEqual(self.post(batch).status_code,200);self.assertTrue(work_once(self.worker))
+        self.assertEqual(self.post(batch).status_code,200)
+        self.assertEqual(self.scalar(f'SELECT count(*) FROM "{schema}".alarmhistory'),'1')
+        self.assertEqual(self.scalar(f'SELECT al_tag_value FROM "{schema}".alarmhistory'),'001.20')
+        changed=self.batch(wire(al_message='Conveyor VFD Connect Error',al_tag_value='002.50'))
+        self.assertEqual(self.post(changed).status_code,200);self.assertTrue(work_once(self.worker))
+        self.assertEqual(self.scalar(f'SELECT count(*) FROM "{schema}".alarmhistory'),'2')
+        self.assertEqual(self.scalar(f'SELECT count(DISTINCT id) FROM "{schema}".alarmhistory'),'1')
+        self.assertEqual(self.scalar(f'SELECT count(*) FROM "{schema}".eventhistory'),'0')
+
+    def test_registered_event_updates_real_table_and_raw_rows_are_managed(self):
+        from server.worker.machine_ai import interpret_once
+        schema=self.native_schema()
+        self.assertEqual(self.post(self.batch(wire(table='eventhistory',ev_message='An event',ev_value='003.10'))).status_code,200)
+        self.assertTrue(work_once(self.worker))
+        self.assertTrue(interpret_once(self.worker,None,allow_alarms=False))
+        self.assertEqual(self.scalar(f'SELECT equipment FROM "{schema}".eventhistory'),'LINE-01')
+        self.assertEqual(self.scalar(f'SELECT identification_status FROM "{schema}".eventhistory'),'registered')
+        result=self._run(f'UPDATE "{schema}".eventhistory SET ev_message=\'manual rewrite\';',succeeds=False)
+        self.assertIn('42501',result.stderr)
+        self.assertEqual(self.scalar(f'SELECT ev_message FROM "{schema}".eventhistory'),'An event')
+
+    def test_source_tables_keep_tenant_isolation_and_private_functions(self):
+        schema=self.native_schema();other=self.native_schema(uid(106))
+        self.assertNotEqual(schema,other)
+        self.assertEqual(self.post(self.batch()).status_code,200);self.assertTrue(work_once(self.worker))
+        self._run(f'GRANT USAGE ON SCHEMA "{schema}" TO scada_worker; GRANT SELECT ON "{schema}".alarmhistory TO scada_worker;')
+        with self.worker.begin() as db:
+            db.execute(text("SELECT set_config('app.customer_id',:customer,true)"),dict(customer=uid(101)))
+            self.assertEqual(db.execute(text(f'SELECT count(*) FROM "{schema}".alarmhistory')).scalar(),0)
+        result=self._run(f"SET ROLE scada_worker; SELECT platform.sync_source_revision('{uid(30)}');",succeeds=False)
+        self.assertIn('42501',result.stderr)
+        self.assertEqual(self.scalar("SELECT rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole FROM pg_roles WHERE rolname='scada_storage_owner'"),'f')
+
+    def test_runtime_rejects_membership_in_the_native_storage_owner(self):
+        self._run(f'GRANT scada_storage_owner TO "{self.roles[1]}";')
+        checked=runtime_engine(self.worker.url.render_as_string(hide_password=False),'scada_worker')
+        try:
+            with self.assertRaisesRegex(ValueError,'runtime database identity'):
+                checked.connect()
+        finally:
+            checked.dispose()
+            self._run(f'REVOKE scada_storage_owner FROM "{self.roles[1]}";')
+
+    def test_native_table_fault_retains_committed_upload_and_retries_without_duplicates(self):
+        schema=self.native_schema();batch=self.batch()
+        self._run(f'ALTER TABLE "{schema}".alarmhistory ADD CONSTRAINT fixture_reject CHECK (id<>1);')
+        reply=self.post(batch)
+        self.assertEqual(reply.status_code,200)
+        self.assertTrue(work_once(self.worker))
+        self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'0')
+        self.assertEqual(self.scalar(f'SELECT count(*) FROM "{schema}".alarmhistory'),'0')
+        self.assertEqual(self.scalar('SELECT status FROM platform.jobs'),'pending')
+        self.assertEqual(self.post(batch).json(),reply.json())
+        self.assertEqual(self.scalar('SELECT count(*) FROM platform.upload_batches'),'1')
+        self._run(f'ALTER TABLE "{schema}".alarmhistory DROP CONSTRAINT fixture_reject; UPDATE platform.jobs SET available_at=now();')
+        self.assertTrue(work_once(self.worker))
+        self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'1')
+        self.assertEqual(self.scalar(f'SELECT count(*) FROM "{schema}".alarmhistory'),'1')
+
+    def test_identification_and_mapping_reprocess_share_lock_order_for_native_updates(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        from sqlalchemy import event
+        from server.worker.machine_ai import interpret_once
+        self.assertEqual(self.post(self.batch(wire(al_tag='UNKNOWN',al_message='Conveyor VFD Connect Error'))).status_code,200)
+        self.assertTrue(work_once(self.worker))
+        self._run(f"""INSERT INTO platform.mapping_versions(mapping_version_id,customer_id,site_id,project_id,source_id,version)
+            VALUES ('{uid(71)}','{uid(1)}','{uid(2)}','{uid(3)}','{uid(6)}',2);
+            INSERT INTO platform.mapping_rules(rule_id,customer_id,site_id,project_id,source_id,mapping_version_id,machine_id,record_type,tag)
+            VALUES ('{uid(72)}','{uid(1)}','{uid(2)}','{uid(3)}','{uid(6)}','{uid(71)}','{uid(4)}','alarm','UNKNOWN');
+            UPDATE platform.mapping_versions SET status='approved',approved_by='fixture',approved_at=now() WHERE mapping_version_id='{uid(71)}';
+            UPDATE platform.jobs SET status='pending',completed_at=NULL;""")
+        updated,ai_lock=threading.Event(),threading.Event()
+        def before(_conn,_cursor,statement,params,_context,_many):
+            if threading.current_thread().name.startswith('fixture-ai') and 'pg_advisory_xact_lock' in statement:
+                ai_lock.set()
+        def after(_conn,_cursor,statement,params,_context,_many):
+            if statement.startswith('UPDATE platform.alarm_event_revisions SET mapping_status'):
+                updated.set();self.assertTrue(ai_lock.wait(3))
+        def response(request):
+            if request.url.path=='/api/tags':return httpx.Response(200,json={'models':[{'name':'qwen3:4b','digest':'fixture'}]})
+            self.assertTrue(updated.wait(3))
+            return httpx.Response(200,json={'done':True,'response':json.dumps({'machines':['Conveyor VFD']})})
+        event.listen(self.worker,'before_cursor_execute',before)
+        event.listen(self.worker,'after_cursor_execute',after)
+        try:
+            with httpx.Client(transport=httpx.MockTransport(response)) as client,ThreadPoolExecutor(max_workers=1,thread_name_prefix='fixture-ai') as pool:
+                ai=pool.submit(interpret_once,self.worker,'qwen3:4b',client)
+                self.assertTrue(work_once(self.worker))
+                self.assertTrue(ai.result(timeout=10))
+        finally:
+            event.remove(self.worker,'before_cursor_execute',before)
+            event.remove(self.worker,'after_cursor_execute',after)
+        schema=self.native_schema()
+        self.assertEqual(self.scalar(f'SELECT equipment FROM "{schema}".alarmhistory'),'Conveyor VFD')
+        self.assertEqual(self.scalar(f'SELECT mapping_status FROM "{schema}".alarmhistory'),'mapped')
+
     def test_acceptance_is_atomic_replay_is_stable_and_conflict_is_rejected(self):
         batch = self.batch()
         first = self.post(batch)
@@ -90,6 +221,128 @@ class DeliveryIntegrationTests(PostgresCase):
         conflict = make_batch(uid(6),uid(7),batch['batch_id'],[wire(al_tag='TAG',al_active=False)])
         self.assertEqual(self.post(conflict).status_code,409)
         self.assertEqual(self.post(batch,'x'*43).status_code,401)
+
+    def test_log_views_preserve_native_fields_and_show_identification_without_duplicate_storage(self):
+        from server.worker.machine_ai import interpret_once
+        alarm=wire(al_message='Conveyor VFD Connect Error',al_tag_value='001.20',al_user='FIXTURE_OPERATOR')
+        event=wire(table='eventhistory',ev_message='An operator event',ev_value='002.50')
+        for record in (alarm,event):
+            self.assertEqual(self.post(self.batch(record)).status_code,200)
+            self.assertTrue(work_once(self.worker))
+        self.assertTrue(interpret_once(self.worker,None,allow_alarms=False))
+        self.assertEqual(self.scalar('SELECT count(*) FROM logs.alarmhistory'),'1')
+        self.assertEqual(self.scalar('SELECT count(*) FROM logs.eventhistory'),'1')
+        self.assertEqual(self.scalar('SELECT al_message FROM logs.alarmhistory'),'Conveyor VFD Connect Error')
+        self.assertEqual(self.scalar('SELECT al_tag_value FROM logs.alarmhistory'),'001.20')
+        self.assertEqual(self.scalar('SELECT al_user FROM logs.alarmhistory'),'FIXTURE_OPERATOR')
+        self.assertEqual(self.scalar('SELECT ev_value FROM logs.eventhistory'),'002.50')
+        self.assertEqual(self.scalar('SELECT equipment FROM logs.eventhistory'),'LINE-01')
+        self.assertEqual(self.scalar('SELECT identification_status FROM logs.eventhistory'),'registered')
+        self.assertEqual(self.scalar("SELECT is_updatable FROM information_schema.views WHERE table_schema='logs' AND table_name='alarmhistory'"),'NO')
+        self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'2')
+
+    def test_log_views_cannot_bypass_customer_isolation_or_raw_data_permissions(self):
+        self.assertEqual(self.post(self.batch()).status_code,200)
+        self.assertTrue(work_once(self.worker))
+        self._run('GRANT USAGE ON SCHEMA logs TO scada_worker,scada_reader; GRANT SELECT ON ALL TABLES IN SCHEMA logs TO scada_worker,scada_reader;')
+        try:
+            with self.worker.begin() as db:
+                db.execute(text("SELECT set_config('app.customer_id',:customer,true)"),dict(customer=uid(101)))
+                self.assertEqual(db.execute(text('SELECT count(*) FROM logs.alarmhistory')).scalar(),0)
+            result=self._run(f"SET ROLE scada_reader; SELECT set_config('app.customer_id','{uid(1)}',false); SELECT al_user FROM logs.alarmhistory;",succeeds=False)
+            self.assertIn('42501',result.stderr)
+        finally:
+            self._run('REVOKE ALL ON ALL TABLES IN SCHEMA logs FROM scada_worker,scada_reader; REVOKE USAGE ON SCHEMA logs FROM scada_worker,scada_reader;')
+
+    def test_local_ai_suggestions_preserve_raw_data_and_revision_count(self):
+        from server.worker.machine_ai import interpret_once
+        batch=self.batch(wire(al_tag='UNKNOWN',al_message='Oven 1 temperature high'))
+        self.assertEqual(self.post(batch).status_code,200)
+        self.assertTrue(work_once(self.worker))
+        before=self.scalar('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions')
+        def response(request):
+            if request.url.path=='/api/tags':
+                return httpx.Response(200,json={'models':[{'name':'qwen3:4b','digest':'test-model-digest'}]})
+            return httpx.Response(200,json={'done':True,'response':json.dumps({'machines':['Oven 1']})})
+        with httpx.Client(transport=httpx.MockTransport(response)) as client:
+            self.assertTrue(interpret_once(self.worker,'qwen3:4b',client))
+            self.assertFalse(interpret_once(self.worker,'qwen3:4b',client))
+        self.assertEqual(self.scalar('SELECT status FROM platform.machine_interpretations'),'suggested')
+        self.assertEqual(self.scalar("SELECT candidates->0->>'label' FROM platform.machine_interpretations"),'Oven 1')
+        self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'1')
+        self.assertEqual(self.scalar('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions'),before)
+        self.assertEqual(self.scalar('SELECT mapping_status FROM platform.alarm_event_revisions'),'quarantined')
+        self.assertEqual(self.scalar("SELECT count(*) FROM platform.audit_log WHERE action='machine_interpreted'"),'1')
+        with self.worker.begin() as db:
+            self.assertEqual(db.execute(text('SELECT count(*) FROM platform.machine_interpretations')).scalar(),0)
+        self._run("UPDATE platform.jobs SET status='pending',completed_at=NULL")
+        self.assertTrue(work_once(self.worker))
+        self.assertEqual(self.scalar('SELECT count(*) FROM platform.machine_interpretations'),'1')
+
+    def test_local_ai_failure_does_not_fail_collection_or_expose_text(self):
+        from server.worker.machine_ai import interpret_once
+        self.assertEqual(self.post(self.batch()).status_code,200)
+        self.assertTrue(work_once(self.worker))
+        with httpx.Client(transport=httpx.MockTransport(lambda _:httpx.Response(503))) as client:
+            self.assertTrue(interpret_once(self.worker,'qwen3:4b',client))
+            self.assertFalse(interpret_once(self.worker,'qwen3:4b',client))
+        self.assertEqual(self.scalar('SELECT status FROM platform.machine_interpretations'),'unavailable')
+        self.assertEqual(self.scalar('SELECT status FROM platform.jobs'),'completed')
+        self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'1')
+
+    def test_alarm_name_correction_requeues_old_suggestions_without_changing_native_records(self):
+        import importlib
+        from server.worker.machine_ai import interpret_once
+        batch=self.batch(wire(al_message='Conveyor VFD Connect Error'))
+        self.assertEqual(self.post(batch).status_code,200)
+        self.assertTrue(work_once(self.worker))
+        fingerprint=self.scalar('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions')
+        self._run('''UPDATE platform.machine_interpretations SET status='suggested',
+            candidates='[{"label":"Conveyor VFD Connect Error","field":"al_message"}]',
+            policy_version='equipment-names-v1';''')
+        migration=importlib.import_module('server.migrations.versions.0006_alarm_names_v2')
+        with patch.object(migration.op,'execute',side_effect=self._run):migration.upgrade()
+        self.assertEqual(self.scalar('SELECT status FROM platform.machine_interpretations'),'pending')
+        def response(request):
+            if request.url.path=='/api/tags':return httpx.Response(200,json={'models':[{'name':'qwen3:4b','digest':'fixture-digest'}]})
+            return httpx.Response(200,json={'done':True,'response':json.dumps({'machines':['Conveyor VFD']})})
+        with httpx.Client(transport=httpx.MockTransport(response)) as client:
+            self.assertTrue(interpret_once(self.worker,'qwen3:4b',client))
+        self.assertEqual(self.scalar("SELECT candidates->0->>'label' FROM platform.machine_interpretations"),'Conveyor VFD')
+        self.assertEqual(self.scalar('SELECT policy_version FROM platform.machine_interpretations'),'equipment-names-v2')
+        self.assertEqual(self.scalar('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions'),fingerprint)
+        self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'1')
+
+    def test_events_use_registered_machine_without_ai_even_when_alarm_ai_is_disabled(self):
+        from unittest.mock import Mock
+        from server.worker.machine_ai import interpret_once
+        self.assertEqual(self.post(self.batch()).status_code,200)
+        event=wire(table='eventhistory',ev_message='Oven 99 changed',ev_source='MUA 99')
+        self.assertEqual(self.post(self.batch(event)).status_code,200)
+        self.assertTrue(work_once(self.worker));self.assertTrue(work_once(self.worker))
+        client=Mock()
+        self.assertTrue(interpret_once(self.worker,None,client,allow_alarms=False))
+        self.assertFalse(interpret_once(self.worker,None,client,allow_alarms=False))
+        client.stream.assert_not_called()
+        self.assertEqual(self.scalar("SELECT candidates->0->>'label' FROM platform.machine_interpretations WHERE source_table='eventhistory'"),'LINE-01')
+        self.assertEqual(self.scalar("SELECT candidates->0->>'machine_id' FROM platform.machine_interpretations WHERE source_table='eventhistory'"),uid(4))
+        self.assertEqual(self.scalar("SELECT status FROM platform.machine_interpretations WHERE source_table='eventhistory'"),'registered')
+        self.assertEqual(self.scalar("SELECT model IS NULL FROM platform.machine_interpretations WHERE source_table='eventhistory'"),'t')
+        self.assertEqual(self.scalar("SELECT status FROM platform.machine_interpretations WHERE source_table='alarmhistory'"),'pending')
+        self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'2')
+
+    def test_events_with_multiple_authorized_machines_remain_uncertain_without_ai(self):
+        from unittest.mock import Mock
+        from server.worker.machine_ai import interpret_once
+        self._run(f"""INSERT INTO platform.machines VALUES ('{uid(70)}','{uid(1)}','{uid(2)}','{uid(3)}','LINE-02','Second machine');
+            INSERT INTO platform.credential_machines VALUES ('{uid(1)}','{uid(2)}','{uid(3)}','{uid(6)}','{uid(50)}','{uid(70)}');""")
+        self.assertEqual(self.post(self.batch(wire(table='eventhistory',ev_message='Oven 1'))).status_code,200)
+        self.assertTrue(work_once(self.worker))
+        client=Mock()
+        self.assertTrue(interpret_once(self.worker,None,client,allow_alarms=False))
+        client.stream.assert_not_called()
+        self.assertEqual(self.scalar('SELECT status FROM platform.machine_interpretations'),'uncertain')
+        self.assertEqual(self.scalar('SELECT jsonb_array_length(candidates) FROM platform.machine_interpretations'),'0')
 
     def test_collector_preflight_authenticates_scope_and_generation_without_uploading(self):
         body=dict(source_id=uid(6),generation_id=uid(7))
@@ -196,13 +449,34 @@ class DeliveryIntegrationTests(PostgresCase):
             with engine.connect() as db:
                 transaction=db.begin()
                 try:
+                    db.execute(text('''DO $$ DECLARE item record; BEGIN
+                        FOR item IN SELECT schema_name FROM platform.source_storage LOOP
+                            EXECUTE format('DROP SCHEMA %I CASCADE',item.schema_name);
+                        END LOOP;
+                    END $$;'''))
+                    db.execute(text('DROP SCHEMA logs CASCADE'))
                     db.execute(text('DROP SCHEMA platform CASCADE'))
                     config=Config(str(ROOT/'alembic.ini'))
                     config.attributes['connection']=db
+                    with patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url}): command.upgrade(config,'0007_log_browsing_views')
+                    # Exercise a real upgrade containing pre-existing committed
+                    # history, not only fresh initialization with empty tables.
+                    from tests.pg_support import batch_sql,revision_sql
+                    db.execute(text(seed_sql()+batch_sql()+revision_sql()))
+                    db.execute(text('UPDATE platform.alarm_event_revisions SET original_payload=CAST(:payload AS jsonb)'),
+                               dict(payload=json.dumps(wire(al_message='Conveyor VFD Connect Error',al_tag_value='001.20')['original'])))
+                    fingerprint=db.execute(text('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions')).scalar()
+                    with patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url}): command.upgrade(config,'0008_source_tables')
+                    original_oid=db.execute(text("""SELECT '"SCADA_PC1"'::regnamespace::oid""")).scalar()
                     with patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url}): command.upgrade(config,'head')
-                    self.assertEqual(db.execute(text('SELECT version_num FROM alembic_version')).scalar(),'0003_source_deletion')
+                    schema=db.execute(text('SELECT schema_name FROM platform.source_storage WHERE source_id=:source'),dict(source=uid(6))).scalar()
+                    self.assertEqual(schema,'Source')
+                    self.assertEqual(db.execute(text("SELECT '\"Source\"'::regnamespace::oid")).scalar(),original_oid)
+                    self.assertEqual(db.execute(text(f'SELECT al_tag_value FROM "{schema}".alarmhistory')).scalar(),'001.20')
+                    self.assertEqual(db.execute(text('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions')).scalar(),fingerprint)
+                    self.assertEqual(db.execute(text('SELECT version_num FROM alembic_version')).scalar(),'0009_source_schema_names')
                     self.assertIsNotNone(db.execute(text("SELECT to_regprocedure('platform.authenticate_upload(bytea)')")).scalar())
-                    self.assertEqual(db.execute(text("SELECT count(*) FROM pg_tables WHERE schemaname='platform'")).scalar(),17)
+                    self.assertEqual(db.execute(text("SELECT count(*) FROM pg_tables WHERE schemaname='platform'")).scalar(),19)
                     with patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url}):
                         command.downgrade(config,'0002_runtime')
                         self.assertEqual(db.execute(text("SELECT count(*) FROM information_schema.columns WHERE table_schema='platform' AND table_name='sources' AND column_name='deleted_at'")).scalar(),0)

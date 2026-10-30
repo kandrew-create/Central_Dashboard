@@ -1,4 +1,10 @@
-# Central Server 0.4 — revision X2
+# Central Server 0.6.1 — revision X3
+
+The new local-AI release adds **5 Local AI** to interpret equipment names from alarm messages on the central PC. Version 0.5.1 identifies events directly from the machine tag selected at source registration; event messages are never sent to AI. Raw records and approved mapping behavior are preserved. See [X3 setup and verification](../docs/release-X3.md). X3 downloads below include Central Server 0.6.1; Collector remains 0.4.0.
+
+Version 0.5.2 separates equipment from the alarm condition (`Conveyor VFD Connect Error` identifies `Conveyor VFD`), rechecks earlier alarm results and shows the original message when a result is selected. Suggestions remain reviewable; literal inclusion in a message alone does not prove an accurate machine name.
+
+Version 0.6.1 names each source schema from its registered SCADA PC/source name, each with just two physical tables: `alarmhistory` and `eventhistory`. Internal tables and history remain preserved. See [pgAdmin browsing](../docs/pgadmin-browsing.md) and [storage details](../docs/source-table-layout.md).
 
 The Central Server receives authenticated HTTPS uploads from SCADA Collectors and stores/processes alarm and event history in its own PostgreSQL database. Install it on the central server PC, or alongside the Collector for local testing.
 
@@ -8,7 +14,7 @@ Network mode accepts multiple collector PCs at one Central Server HTTPS endpoint
 
 ## Windows package
 
-[Download the X2 Central Server installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X2/Linker-Central-Server-Setup.exe). [Release notes and checksums](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X2).
+[Download the X3 Central Server installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X3/Linker-Central-Server-Setup.exe). [Release notes and checksums](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X3).
 
 - Installer: `dist/installer/Linker-Central-Server-Setup.exe`.
 - Standalone executable: `dist/central-server/central-server.exe`.

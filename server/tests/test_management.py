@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from uuid import uuid4
 from unittest.mock import patch
 
 import psycopg
@@ -25,6 +26,8 @@ class ManagementIntegrationTests(PostgresCase):
         super().setUpClass()
         cls._run((ROOT/'server/migrations/sql/0002_runtime.sql').read_text(encoding='utf-8'))
         cls._run((ROOT/'server/migrations/sql/0003_source_deletion.sql').read_text(encoding='utf-8'))
+        for name in ('0004_machine_interpretation','0005_registered_event_machine','0007_log_browsing_views','0008_source_tables','0009_source_schema_names'):
+            cls._run((ROOT/('server/migrations/sql/'+name+'.sql')).read_text(encoding='utf-8'))
 
     def setUp(self):
         self.directory=tempfile.TemporaryDirectory();self.addCleanup(self.directory.cleanup)
@@ -47,6 +50,40 @@ class ManagementIntegrationTests(PostgresCase):
             self.service.register('Second PC',customer_name='Customer',site_name='Site',project_name='Project\x00Name',machine_tag='M-2')
         with self.service.connection() as db:
             self.assertEqual(db.execute('SELECT count(*) n FROM platform.customers').fetchone()['n'],before)
+
+    def test_registration_creates_stable_two_table_schema_and_deletion_retains_it(self):
+        source=self.register()
+        with self.service.connection() as db:
+            schema=db.execute('SELECT schema_name FROM platform.source_storage WHERE source_id=%s',(source['source_id'],)).fetchone()['schema_name']
+            tables=db.execute("SELECT relname,relkind FROM pg_class WHERE relnamespace=%s::regnamespace AND relkind IN ('r','v','m','p') ORDER BY relname",('"'+schema+'"',)).fetchall()
+        self.assertRegex(schema,r'^SCADA PC(?:_[0-9a-f]+)?$')
+        self.assertEqual([(r['relname'],r['relkind']) for r in tables],[('alarmhistory','r'),('eventhistory','r')])
+        self.assertEqual(next(r for r in self.service.sources() if str(r['source_id'])==source['source_id'])['storage_schema'],schema)
+        self.service.delete_source(source['source_id'])
+        with self.service.connection() as db:
+            self.assertEqual(db.execute('SELECT schema_name FROM platform.source_storage WHERE source_id=%s',(source['source_id'],)).fetchone()['schema_name'],schema)
+            self.assertIsNotNone(db.execute('SELECT to_regnamespace(%s) namespace',('"'+schema+'"',)).fetchone()['namespace'])
+
+    def test_schema_uses_registered_label_and_handles_duplicates_quotes_and_identifier_limits(self):
+        label='Oven Line SCADA '+uuid4().hex[:8]
+        names=[label,label,'Oven "A" SCADA '+uuid4().hex[:8],
+               '機械'*80,'pg_reserved_'+uuid4().hex[:8],'platform','SCADA, Line '+uuid4().hex[:8]]
+        schemas=[]
+        for name in names:
+            source=self.service.register(name,customer_name='Customer',site_name='Site',project_name='Project',machine_tag='M-1')
+            with self.service.connection() as db:
+                schema=db.execute('SELECT schema_name FROM platform.source_storage WHERE source_id=%s',(source['source_id'],)).fetchone()['schema_name']
+                self.assertIsNotNone(db.execute('SELECT to_regnamespace(%s) namespace',(psycopg.sql.Identifier(schema).as_string(db),)).fetchone()['namespace'])
+            self.assertLessEqual(len(schema.encode('utf-8')),63)
+            self.assertNotIn(',',schema)
+            self.assertFalse(schema.startswith('pg_'))
+            schemas.append(schema)
+        self.assertEqual(schemas[0],label)
+        self.assertTrue(schemas[1].startswith(label+'_'))
+        self.assertEqual(schemas[2],names[2])
+        self.assertTrue(schemas[3].startswith('機械'))
+        self.assertTrue(schemas[5].startswith('platform_'))
+        self.assertEqual(len(set(schemas)),len(schemas))
 
     def test_registry_reuse_scope_vault_export_and_rotation(self):
         first=self.register()

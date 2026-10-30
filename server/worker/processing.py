@@ -128,6 +128,10 @@ def process_job(engine, job):
                         machine_id=:machine_id,severity=:severity WHERE revision_id=:revision_id'''), values)
                 elif existing['mapping_status'] == 'mapped':
                     values['mapping_status'] = 'mapped'
+            db.execute(text('''INSERT INTO platform.machine_interpretations
+                (revision_id,customer_id,source_id,generation_id,source_table,source_record_id)
+                VALUES (:revision_id,:customer_id,:source_id,:generation_id,:source_table,:source_record_id)
+                ON CONFLICT (revision_id) DO NOTHING'''), values)
             quarantined += values['mapping_status'] == 'quarantined'
             update_latest(db, values, record)
         completed = db.execute(text('''UPDATE platform.jobs SET status='completed',completed_at=now(),lease_token=NULL,lease_expires_at=NULL,

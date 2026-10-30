@@ -25,12 +25,15 @@ def runtime_engine(url: str, component=None):
                 SELECT r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR EXISTS (
                     SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                     WHERE n.nspname = 'platform' AND pg_has_role(r.oid, c.relowner, 'MEMBER')
+                ) OR EXISTS (
+                    SELECT 1 FROM pg_roles helper WHERE helper.rolname IN ('scada_bootstrap_owner','scada_storage_owner')
+                    AND pg_has_role(r.oid,helper.oid,'MEMBER')
                 ) FROM pg_roles r WHERE r.rolname = current_user
             """)
             privileged = cursor.fetchone()[0]
             if component:
                 cursor.execute("SELECT pg_has_role(current_user,%s,'MEMBER') AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=ANY(%s) AND pg_has_role(current_user,oid,'MEMBER'))",
-                               (component, [r for r in ('scada_ingest','scada_worker','scada_registry','scada_bootstrap_owner') if r != component]))
+                               (component, [r for r in ('scada_ingest','scada_worker','scada_registry','scada_bootstrap_owner','scada_storage_owner') if r != component]))
                 privileged = privileged or not cursor.fetchone()[0]
         dbapi_connection.rollback()
         if privileged:
