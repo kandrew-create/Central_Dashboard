@@ -36,6 +36,7 @@ class DeliveryIntegrationTests(PostgresCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._run((ROOT/'server/migrations/sql/0002_runtime.sql').read_text(encoding='utf-8'))
+        cls._run((ROOT/'server/migrations/sql/0003_source_deletion.sql').read_text(encoding='utf-8'))
         cls.roles = ['api_'+uuid4().hex,'worker_'+uuid4().hex,'source_'+uuid4().hex]
         for role,capability in zip(cls.roles[:2],('scada_ingest','scada_worker')):
             cls._run(f'CREATE ROLE "{role}" LOGIN; GRANT {capability} TO "{role}";')
@@ -117,6 +118,25 @@ class DeliveryIntegrationTests(PostgresCase):
         self.assertEqual(self.post(batch).status_code,422)
         self.assertEqual(self.scalar('SELECT count(*) FROM platform.upload_batches'),'0')
 
+    def test_deleted_source_blocks_upload_and_check_but_preserves_pending_processing(self):
+        from server.management.service import ManagerService
+        from server.management.settings import ServerSettings
+        service=ManagerService(ServerSettings(Path(tempfile.gettempdir())),
+                               lambda:psycopg.connect(dbname=self.database,row_factory=dict_row))
+        batch=self.batch()
+        self.assertEqual(self.post(batch).status_code,200)
+        service.delete_source(uid(6))
+        self.assertEqual(self.post(batch).status_code,401)
+        self.assertEqual(self.api.post('/v1/collector-check',json=dict(source_id=uid(6),generation_id=uid(7)),
+                                      headers={'Authorization':'Bearer '+self.token}).status_code,401)
+        self.assertTrue(work_once(self.worker))
+        self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'1')
+        self.assertEqual(self.scalar('SELECT count(*) FROM platform.upload_batches'),'1')
+        # Even an accidentally re-enabled credential cannot reactivate a deleted source.
+        self._run(f"UPDATE platform.collector_credentials SET revoked_at=NULL WHERE credential_id='{uid(50)}'")
+        self.assertEqual(self.post(self.batch()).status_code,401)
+        self.assertEqual(self.scalar("SELECT count(*) FROM platform.sources WHERE source_id='"+uid(106)+"' AND deleted_at IS NULL"),'1')
+
     def test_lifecycle_out_of_order_and_same_marker_changes_preserve_one_occurrence(self):
         for record in (wire(al_tag='TAG',al_active=True),
                        wire(stamp='2026-10-28T10:02:00.000000',al_tag='TAG',al_active=False,al_ack=True),
@@ -180,9 +200,14 @@ class DeliveryIntegrationTests(PostgresCase):
                     config=Config(str(ROOT/'alembic.ini'))
                     config.attributes['connection']=db
                     with patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url}): command.upgrade(config,'head')
-                    self.assertEqual(db.execute(text('SELECT version_num FROM alembic_version')).scalar(),'0002_runtime')
+                    self.assertEqual(db.execute(text('SELECT version_num FROM alembic_version')).scalar(),'0003_source_deletion')
                     self.assertIsNotNone(db.execute(text("SELECT to_regprocedure('platform.authenticate_upload(bytea)')")).scalar())
                     self.assertEqual(db.execute(text("SELECT count(*) FROM pg_tables WHERE schemaname='platform'")).scalar(),17)
+                    with patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url}):
+                        command.downgrade(config,'0002_runtime')
+                        self.assertEqual(db.execute(text("SELECT count(*) FROM information_schema.columns WHERE table_schema='platform' AND table_name='sources' AND column_name='deleted_at'")).scalar(),0)
+                        command.upgrade(config,'head')
+                    self.assertEqual(db.execute(text("SELECT count(*) FROM information_schema.columns WHERE table_schema='platform' AND table_name='sources' AND column_name='deleted_at'")).scalar(),1)
                 finally:
                     transaction.rollback()
         finally:

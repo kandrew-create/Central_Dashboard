@@ -15,6 +15,15 @@ from server.management.settings import ServerSettings
 
 
 class ManagementRuntimeTests(unittest.TestCase):
+    def test_component_start_does_not_create_a_demo_source_by_default(self):
+        from server.management.entry import _main
+        with patch.dict(os.environ):
+            os.environ.pop('LINKER_SERVER_CREATE_DEMO_SOURCE',None)
+            with patch('deploy.local_server.main') as control:
+                self.assertEqual(_main(['--component','start']),0)
+                self.assertEqual(os.environ['LINKER_SERVER_CREATE_DEMO_SOURCE'],'0')
+        control.assert_called_once_with(['start'])
+
     @unittest.skipUnless(os.name=='nt','Windows process identity')
     def test_stale_process_metadata_is_harmless_on_repeated_stop(self):
         from deploy.local_server import stop_process
@@ -73,6 +82,51 @@ class ManagerWindowTests(unittest.TestCase):
         with patch('server.management.gui.messagebox.askyesno',return_value=True):self.app.stop_server()
         self.wait_idle();self.service.stop.assert_called_once_with()
         self.assertIn('Ready',self.app.health_text.get())
+
+    def select_source(self):
+        row=dict(source_id=uuid4(),name='Network SCADA PC',customer_name='Customer',site_name='Site',project_name='Project',
+                 generation_id=uuid4(),last_received=None,quarantined_batches=0)
+        self.service.sources.return_value=[row]
+        self.app.refresh();self.wait_idle()
+        self.app.tree.selection_set(str(row['source_id']));self.app.selected()
+        return row
+
+    def test_delete_requires_selection_and_confirmation_and_respects_busy_state(self):
+        with patch('server.management.gui.messagebox.showinfo') as info:self.app.delete_button.invoke()
+        info.assert_called_once();self.service.delete_source.assert_not_called()
+        row=self.select_source()
+        with patch('server.management.gui.messagebox.askyesno',return_value=False) as confirm:
+            self.app.delete_button.invoke()
+        self.service.delete_source.assert_not_called()
+        self.assertIn(str(row['source_id']),confirm.call_args.args[1])
+        self.assertIn('Customer',confirm.call_args.args[1])
+        self.assertIn('Unsent batches remain',confirm.call_args.args[1])
+        self.assertEqual(confirm.call_args.kwargs['default'],'no')
+        self.app.busy=True
+        try:
+            with patch('server.management.gui.messagebox.askyesno') as confirm:self.app.delete_source()
+            confirm.assert_not_called()
+        finally:self.app.busy=False
+
+    def test_delete_in_network_mode_refreshes_list_and_preserves_success_message(self):
+        self.service.settings=ServerSettings(Path(self.folder.name),mode='network',listen_address='0.0.0.0',server_host='central-pc')
+        row=self.select_source()
+        self.service.delete_source.side_effect=lambda source:self.service.sources.return_value.clear()
+        with patch('server.management.gui.messagebox.askyesno',return_value=True):self.app.delete_button.invoke()
+        self.wait_idle()
+        self.service.delete_source.assert_called_once_with(row['source_id'])
+        self.assertEqual(self.app.tree.get_children(),())
+        self.assertNotIn(str(row['source_id']),self.app.details.get())
+        self.assertIn('SCADA source deleted',self.app.status_text.get())
+
+    def test_delete_failure_keeps_selected_source_and_reports_error(self):
+        row=self.select_source()
+        self.service.delete_source.side_effect=CollectorError('Cannot delete this source.')
+        with patch('server.management.gui.messagebox.askyesno',return_value=True),patch('server.management.gui.messagebox.showerror') as error:
+            self.app.delete_button.invoke();self.wait_idle()
+        error.assert_called_once()
+        self.assertTrue(self.app.tree.exists(str(row['source_id'])))
+        self.assertEqual(self.app.status_text.get(),'Cannot delete this source.')
 
     def test_registration_hierarchy_and_generated_identity_display(self):
         customer_id=uuid4();site_id=uuid4()
@@ -149,7 +203,7 @@ class ManagerWindowTests(unittest.TestCase):
         self.assertEqual(self.app.status_text.get(),self.status['error'])
 
     def test_network_mode_sets_listener_and_previews_destination_without_starting(self):
-        self.app.mode.set('Network server (two PCs)');self.app._mode_changed()
+        self.app.mode.set('Network server (multiple collector PCs)');self.app._mode_changed()
         self.assertEqual(self.app.listen_address.get(),'0.0.0.0')
         self.assertEqual(self.app.server_host.get(),'')
         self.app.server_host.set('central-pc')

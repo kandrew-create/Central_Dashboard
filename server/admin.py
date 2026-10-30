@@ -113,7 +113,7 @@ def main(argv=None):
                 handoff = provision(db,args.customer,args.site,args.project,args.machine_tag,args.alarm_tag,args.event_source)
                 private_output(args.output, handoff)
             elif args.command == 'rotate-credential':
-                source = db.execute('SELECT * FROM platform.sources WHERE source_id=%s', (args.source_id,)).fetchone()
+                source = db.execute('SELECT * FROM platform.sources WHERE source_id=%s AND deleted_at IS NULL FOR UPDATE', (args.source_id,)).fetchone()
                 if not source:
                     raise ValueError('Unknown source.')
                 token = secrets.token_urlsafe(32)
@@ -126,7 +126,7 @@ def main(argv=None):
                     db.execute('UPDATE platform.collector_credentials SET revoked_at=now() WHERE source_id=%s AND credential_id<>%s', (args.source_id,credential_id))
                 private_output(args.output, {'source_id':str(args.source_id),'credential_id':str(credential_id),'upload_token':token})
             elif args.command == 'new-generation':
-                source = db.execute('SELECT * FROM platform.sources WHERE source_id=%s FOR UPDATE',(args.source_id,)).fetchone()
+                source = db.execute('SELECT * FROM platform.sources WHERE source_id=%s AND deleted_at IS NULL FOR UPDATE',(args.source_id,)).fetchone()
                 if not source or not args.authorization.strip():
                     raise ValueError('Source and local authorization reference required.')
                 db.execute('UPDATE platform.source_generations SET retired_at=now() WHERE source_id=%s AND retired_at IS NULL',(args.source_id,))

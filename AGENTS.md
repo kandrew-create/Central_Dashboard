@@ -15,6 +15,7 @@ This repository contains the Linker SCADA Collector and Central Server. Read [RE
 
 - Keep SCADA source access read-only. Never apply migrations, restore backups, create indexes, alter schemas, or modify records in a SCADA source database. Collection must not affect machinery or SCADA operation.
 - Collectors initiate uploads on locally configured schedules. Keep the collector free of network listeners and remote command/configuration mechanisms.
+- Network mode supports multiple collector PCs uploading to one central HTTPS endpoint. Register each SCADA database source separately, provision its own setup/credential, and allow every intended collector PC through the firewall. Do not describe this mode as limited to two PCs.
 - Central Server owns a separate PostgreSQL database. Preserve customer/source/machine identity and enforce customer isolation in application queries and database permissions.
 - Preserve original alarm/event fields, source timestamps, separate milliseconds, and revision history. Flag uncertain ordering, timezones, and mappings instead of guessing values or current state.
 - Preserve durable acceptance and replay behavior: acknowledge uploads only after commit, validate matching batch ID/hash/committed receipts, and retain unconfirmed local batches through faults and restarts.
@@ -24,7 +25,7 @@ This repository contains the Linker SCADA Collector and Central Server. Read [RE
 ## Credentials and local state
 
 - Keep passwords, upload tokens, private TLS keys, raw customer records, and operator text out of source control, logs, and release artifacts. Use the existing protected credential and encrypted setup mechanisms.
-- `PC_Station2_1.linker-collector` is an explicitly requested password-encrypted setup export tracked in Git. Keep its unlock password and decrypted contents outside Git; other setup exports remain ignored.
+- Encrypted `.linker-collector` setup exports remain ignored. Keep their unlock passwords and decrypted contents outside Git.
 - Preserve existing collector settings, IDs, checkpoints, pending batches, and central data during routine development. Do not clear state to bypass a fault.
 - `.tools/`, `collector-local/`, `.env`, and DPAPI files contain local operational state. `.tools/` helpers are ignored and may depend on this development PC; do not treat them as portable CI infrastructure.
 - Consult [docs/central-server-windows.md](docs/central-server-windows.md) and [docs/operations.md](docs/operations.md) for commissioning and recovery. Development defaults are central PostgreSQL on loopback port `55441` and HTTPS on `8443`; check saved settings before assuming these values.
@@ -74,6 +75,8 @@ Keep settings-save confirmation separate from server readiness: a post-save refr
 
 Registration names are single-line labels: trim surrounding whitespace and fold pasted CR/LF/tab separators to spaces before enforcing the 1–255 character limit. Distinguish empty, overlength and unsupported-control-character errors. Validate new registration names before database work and preserve existing-item reuse and transaction rollback.
 
+Source deletion is a confirmed registration removal in both operating modes: set `sources.deleted_at`, revoke its credentials and append an audit event atomically. Hide deleted sources from the manager; preserve identities, generations, mappings, committed data, jobs and protected setup files. Block setup export/credential replacement and authentication for deleted sources. Apply migration `0003_source_deletion` only to Central Server storage. Management startup must not create demo sources by default.
+
 Collector setup import must not be blocked by unsaved fields supplied by the setup file itself (IDs, URL, upload enable flag and CA path). Import against the last saved local configuration; preserve unsaved database/history/schedule changes by requiring an explicit save, and retain identity/queue/scheduler-lock guards. Explain missing local setup and show protected-credential presence without displaying secrets; Test server verifies validity.
 
 Validate the Docker Compose template without starting services:
@@ -95,4 +98,4 @@ docker compose --env-file .env.example -f deploy/docker-compose.yml config --qui
 
 ## Latest project change
 
-2026-10-29: Added the user-requested encrypted `PC_Station2_1.linker-collector` setup export after validating its envelope format, size and encoding. Its unlock password is excluded; other setup exports remain ignored. Application downloads remain at [revision X2](docs/release-X2.md).
+2026-10-30: Added [confirmed source deletion](docs/source-deletion-verification-2026-10-30.md) with migration `0003_source_deletion` and clarified Network mode for [multiple collector PCs](docs/network-mode-implementation-2026-10-28.md#2026-10-30-multiple-collector-wording). PostgreSQL 17/18 suites and 25 GUI/network checks passed. Packages were rebuilt; source deletion is installed, but the wording-only installation was canceled. Included removal of the locally deleted tracked setup export; other exports remain ignored. Published X2 assets are unchanged.

@@ -4,7 +4,7 @@ The Windows package now supports the requested Local testing and Network server 
 
 ## Implemented
 
-- Central Server **4 Connection & mode** selects Local testing (one PC) or Network server (two PCs), HTTPS listen IPv4, central PC hostname/IPv4 and HTTPS port. The form previews the collector upload URL. Save/start/export reject unsaved or invalid configurations. Changing active settings requires stopping the selected server first.
+- Central Server **4 Connection & mode** selects Local testing (one PC) or Network server, HTTPS listen IPv4, central PC hostname/IPv4 and HTTPS port. The original Network server label said **two PCs**; the 2026-10-30 update clarifies **multiple collector PCs**. This wording change does not introduce a new capacity limit. The form previews the collector upload URL. Save/start/export reject unsaved or invalid configurations. Changing active settings requires stopping the selected server first.
 - Local testing remains the default and uses `127.0.0.1` / `localhost`. Network mode presets `0.0.0.0` and requires a reachable hostname/IPv4; it rejects loopback and unspecified destination addresses. A specific adapter IPv4 can be selected instead of all adapters.
 - Runtime settings propagate to the API, readiness checks and worker child processes. Central PostgreSQL always binds loopback, independently of the HTTPS listener.
 - Managed certificates cover the advertised hostname/IPv4 and local health-check address. Private CA signing material is retained for normal renewal/address changes, so leaf renewal does not require replacing collector CA trust. Existing valid local certificates are preserved. Export refuses stale/mismatched certificate material.
@@ -38,3 +38,11 @@ GUI controls are rendered and inspected. The full acceptance suite uses disposab
 The actual second PC is not connected in this session. Its hostname resolution, firewall/network route and end-to-end behavior must be checked using the packaged **Test server** and a bounded real upload when available. Firewall rules are not added automatically. The non-loopback interface test proves this package's network path on the current PC; it does not assert that another PC's network is commissioned.
 
 New generated certificates are for commissioning with explicit private-CA trust, not a replacement for production TLS/hardening policy. Windows service startup/reboot/account commissioning, clean Linux deployment, off-server recovery and representative SCADA load checks remain separate gates. Machine mapping approval and customer portal/reporting are unchanged.
+
+## 2026-10-30: multiple-collector wording
+
+The source manager now labels Network mode **Network server (multiple collector PCs)** and explains that collectors share one central endpoint while using separate registered source identities and setup credentials. The previous **two PCs** text did not enforce a two-PC limit. No database, upload-protocol or saved-settings format change was needed for this wording correction.
+
+All 25 manager GUI and network-settings checks passed. The Central Server executable and installer were rebuilt, their SHA-256 sidecars verified, and the new label confirmed in the packaged GUI code. The Windows administrator prompt for this subsequent wording-only installation was canceled, so the installed executable retains its earlier label and the existing manager was reopened. The server remains ready in Network mode with its saved settings, registry identities and protected credentials unchanged.
+
+The rebuilt installer is under `dist/installer`; its SHA-256 is `24f719f59ffc802d0b54d75961baffbecfeeaf2ed280e8182024e8e047c79c12`. The rebuilt executable SHA-256 is `a0e11c161d890339025956ae32d365da8a88bf276a485eb86107b91738b828c1`. These are subsequent builds to the installed [source-deletion update](source-deletion-verification-2026-10-30.md). Published X2 assets remain unchanged. Additional collector PCs still require explicit firewall access; the existing PC-specific rule was not broadened by this wording change.

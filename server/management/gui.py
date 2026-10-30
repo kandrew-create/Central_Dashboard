@@ -12,7 +12,7 @@ from server.management.service import ManagerService,text
 from server.management.settings import ServerSettings,load_settings,save_settings
 
 NEW='<Create new>'
-MODES={'Local testing (one PC)':'local','Network server (two PCs)':'network'}
+MODES={'Local testing (one PC)':'local','Network server (multiple collector PCs)':'network'}
 
 
 class ManagerWindow:
@@ -106,7 +106,7 @@ class ManagerWindow:
     def _connection_tab(self,parent):
         card=self._scroll_card(parent)
         ttk.Label(card,text='Server connection and testing mode',style='Title.TLabel').pack(anchor='w',pady=(0,12))
-        ttk.Label(card,text='Local testing keeps HTTPS on this PC. Network server accepts collectors from other PCs using the hostname/IP below.',style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=6)
+        ttk.Label(card,text='Local testing keeps HTTPS on this PC. Network server accepts multiple collector PCs using the same central server hostname/IP below. Register each SCADA source and export its own collector setup.',style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=6)
         grid=ttk.Frame(card,style='Card.TFrame');grid.pack(fill='x')
         grid.columnconfigure(1,weight=1)
         ttk.Label(grid,text='Operating mode',style='Card.TLabel').grid(row=0,column=0,sticky='w',padx=(0,14),pady=5)
@@ -192,6 +192,8 @@ class ManagerWindow:
         self.button(bar,'Export encrypted collector setup',self.export_dialog).pack(side='left')
         self.button(bar,'Create replacement upload credential',self.rotate).pack(side='left',padx=8)
         self.button(bar,'Refresh sources',self.refresh).pack(side='left')
+        self.delete_button=self.button(bar,'Delete selected source',self.delete_source)
+        self.delete_button.pack(side='right')
         ttk.Label(bottom,text='Copy the exported file to the SCADA PC, then choose Import server setup in the collector. Keep the file password separate.',
                   style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=(12,0))
 
@@ -268,6 +270,7 @@ class ManagerWindow:
         for key,row in self.source_rows.items():
             self.tree.insert('', 'end', iid=key,values=(row['name'],row['customer_name'],row['site_name'],row['project_name'],key,str(row['generation_id'] or ''),str(row['last_received'] or 'No uploads'),row['quarantined_batches']))
         if selected and selected[0] in self.source_rows:self.tree.selection_set(selected[0])
+        else:self.selected()
         self.status_text.set(success_message or status['error'] or 'Central Server status refreshed.')
 
     def refresh(self,success_message=None):
@@ -366,6 +369,22 @@ class ManagerWindow:
         row=self._selected()
         if row and messagebox.askyesno('Replacement upload credential','Create a replacement for this source? Existing credentials stay valid. Export and import the new setup to use the replacement.',parent=self.root):
             self._start('Creating a new protected upload credential...',lambda:self.service.rotate(row['source_id']),lambda _:self.status_text.set('Replacement credential created. Export an encrypted setup for this source.'))
+
+    def delete_source(self):
+        if self.busy:return
+        row=self._selected()
+        if not row:
+            messagebox.showinfo('Select source','Select a registered SCADA source to delete.',parent=self.root);return
+        message=(f"Delete SCADA source: {row['name']}?\n\n"
+                 f"Customer: {row['customer_name']}\nSite: {row['site_name']}\nProject: {row['project_name']}\n"
+                 f"Source ID: {row['source_id']}\n\n"
+                 'This removes the registration from this list and revokes all its upload credentials. '
+                 'Received records, mappings and audit history are retained. '
+                 'Unsent batches remain on the collector and cannot upload using this registration.\n\n'
+                 'This cannot be undone from this window. Continue?')
+        if not messagebox.askyesno('Delete registered SCADA source',message,parent=self.root,icon='warning',default='no'):return
+        self._start('Deleting the selected SCADA source registration...',lambda:self.service.delete_source(row['source_id']),
+                    lambda _:self.refresh('SCADA source deleted. Upload credentials revoked; received history retained.'))
 
     def close(self):
         if self.busy:

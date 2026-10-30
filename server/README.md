@@ -4,6 +4,8 @@ The Central Server receives authenticated HTTPS uploads from SCADA Collectors an
 
 The separate [SCADA Collector](../collector/README.md) runs on the SCADA PC. It uses source database credentials and an outbound upload connection. The two applications share protocol definitions in `shared/`.
 
+Network mode accepts multiple collector PCs at one Central Server HTTPS endpoint. Register each SCADA database source separately and give each collector its own encrypted setup file and upload credential. Allow all intended collector PCs through the server firewall. The current manager labels this **Network server (multiple collector PCs)**; the older **two PCs** label did not enforce a two-PC limit.
+
 ## Windows package
 
 [Download the X2 Central Server installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X2/Linker-Central-Server-Setup.exe). [Release notes and checksums](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X2).
@@ -18,6 +20,8 @@ The rebuilt installer stops the configured server before updating files, closes 
 PostgreSQL 17 or 18 is a prerequisite for X2. The older X1 installer supports PostgreSQL 17 only. New setups detect an installed version, preferring 18. Choose **4 Connection & mode** for Local testing or Network server mode, confirm the PostgreSQL bin folder and save the hostname/listener settings, then initialize/start the server. Existing databases require binaries of the same major version; changing the bin folder does not upgrade data. Register the SCADA source and export an encrypted collector setup file. Import that file in the Collector and use **Test server** before collecting history.
 
 Follow the [Windows setup guide](../docs/central-server-windows.md) for certificates, firewall access and testing from another PC. See [operations and recovery](../docs/operations.md) for Linux deployment, backup, mapping approval and reprocessing.
+
+The current source checkout adds **Delete selected source** under **Sources & collector setup**. After confirmation it removes a registration from use, revokes its upload credentials and retains received history and audit records. It works in both operating modes; use a newly rebuilt package for this button because the published X2 installer predates it. See [source deletion](../docs/central-server-windows.md#delete-a-registered-source) for retained data and collector queue behavior.
 
 ## Source layout
 

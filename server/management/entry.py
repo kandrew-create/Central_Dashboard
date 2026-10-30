@@ -10,6 +10,8 @@ def _main(argv=None):
     parser.add_argument('--component',choices=('start','stop','status','api','worker','migrate','runtime-logins'))
     args=parser.parse_args(argv)
     component=args.component
+    if component=='start':
+        os.environ.setdefault('LINKER_SERVER_CREATE_DEMO_SOURCE','0')
     if component is None:
         from server.management.gui import launch
         return launch()

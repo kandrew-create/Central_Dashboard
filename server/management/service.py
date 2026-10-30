@@ -105,7 +105,7 @@ class ManagerService:
             pass
         try:
             with self.connection() as db:
-                counts=db.execute('''SELECT (SELECT count(*) FROM platform.sources) sources,
+                counts=db.execute('''SELECT (SELECT count(*) FROM platform.sources WHERE deleted_at IS NULL) sources,
                     (SELECT count(*) FROM platform.upload_batches) batches,
                     (SELECT count(*) FROM platform.alarm_event_revisions) revisions,
                     (SELECT count(*) FROM platform.upload_batches WHERE processing_status='quarantined') quarantined_batches,
@@ -135,14 +135,31 @@ class ManagerService:
                 FROM platform.sources s JOIN platform.customers c USING(customer_id)
                 JOIN platform.sites si ON si.site_id=s.site_id JOIN platform.projects p ON p.project_id=s.project_id
                 LEFT JOIN platform.source_generations g ON g.source_id=s.source_id AND g.retired_at IS NULL
+                WHERE s.deleted_at IS NULL
                 ORDER BY s.name,s.source_id LIMIT 1000''').fetchall()
 
     def _existing(self,db,table,key,value,parent=None):
         value=UUID(str(value))
-        row=db.execute(sql.SQL('SELECT * FROM platform.{} WHERE {}=%s').format(sql.Identifier(table),sql.Identifier(key)),(value,)).fetchone()
+        query=sql.SQL('SELECT * FROM platform.{} WHERE {}=%s').format(sql.Identifier(table),sql.Identifier(key))
+        if table=='sources':query+=sql.SQL(' FOR UPDATE')
+        row=db.execute(query,(value,)).fetchone()
         if row is None or (parent and any(row[k]!=v for k,v in parent.items())):
             raise CollectorError('The selected registry item does not belong to the selected customer/site/project.')
+        if table=='sources' and row['deleted_at'] is not None:
+            raise CollectorError('This SCADA source registration has been deleted. Refresh the sources list.')
         return row
+
+    @operation
+    def delete_source(self,source_id):
+        with self.connection() as db:
+            source=self._existing(db,'sources','source_id',source_id)
+            scope=(source['source_id'],source['customer_id'])
+            db.execute('UPDATE platform.sources SET deleted_at=now() WHERE source_id=%s AND customer_id=%s',scope)
+            db.execute('''UPDATE platform.collector_credentials SET revoked_at=now()
+                WHERE source_id=%s AND customer_id=%s AND revoked_at IS NULL''',scope)
+            db.execute("""INSERT INTO platform.audit_log(customer_id,actor,action,entity_type,entity_id)
+                VALUES (%s,current_user,'source_deleted','source',%s)""",(source['customer_id'],source['source_id']))
+        return {'source_id':str(source['source_id'])}
 
     def _vault_path(self,source_id):
         source=str(UUID(str(source_id)))

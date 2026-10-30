@@ -2,7 +2,7 @@
 
 Software 2 has a native Windows management window. Version 0.4 provides Local testing and Network server modes. The [X2 release](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X2) supports PostgreSQL 17 and 18; the older X1 installer supports 17 only. PostgreSQL must already be installed; the executable includes the application dependencies but not PostgreSQL itself. Central storage always uses a separate PostgreSQL database on the server PC's loopback address. SCADA source storage is not initialized or changed.
 
-| Setting | Local testing (one PC) | Network server (two PCs) |
+| Setting | Local testing (one PC) | Network server (multiple collector PCs) |
 |---|---|---|
 | Collector location | Same PC as the server | SCADA PC on a reachable network |
 | HTTPS listen address | `127.0.0.1` | `0.0.0.0` for all IPv4 adapters, or a specific server LAN IPv4 |
@@ -36,12 +36,24 @@ On the central server PC, open **2 Register SCADA source**. Select existing cust
 
 New names must contain 1–255 characters after trimming. The current build replaces pasted tabs and line breaks with spaces before validation and storage, so copying a wrapped project name does not cause a misleading length error. Empty names, names over the limit and other unsupported control characters have distinct messages. The form checks new names before starting database work; selecting an existing item reuses it without requiring its new-name field.
 
+### Delete a registered source
+
+In the updated source checkout or a newly rebuilt Central Server package, open **3 Sources & collector setup**, select the source, and choose **Delete selected source**. Review its name, customer/site/project and Source ID in the confirmation. This works in both Local and Network modes and does not change the server connection settings. The published X2 package predates this button.
+
+Deletion removes the registration from the list and source count, revokes all of its upload credentials, and records the action in the audit log. It retains the source identity, generations, mappings, committed uploads, receipts, stored revisions and protected setup files. Already accepted jobs can finish processing; an upload already in progress may finish committing. This is registration removal, not a purge of stored history. Other sources and shared customer/site/project/machine entries remain available.
+
+The deleted source cannot export a setup or receive a replacement credential. Its existing setup files no longer authorize uploads or **Test server**. Unconfirmed batches stay on the collector; do not clear its queue to bypass deletion. There is no restore button. Re-registering creates new IDs and cannot replace the identity of an assigned collector with pending batches. If the source should continue collecting, cancel deletion and keep its existing registration.
+
+The new package adds the `0003_source_deletion` migration to the separate Central Server database on startup. Keep the migration history and operational data; never apply it to a SCADA source database. Starting through the management component does not create a demo source by default.
+
 On the SCADA PC, the operator imports the file into its local collector configuration. Source ID identifies the registered SCADA database; it is not a PostgreSQL server ID. Generation ID identifies one continuous incarnation of that source history. Database replacement/reset is an explicit recovery operation, not automatic reassignment during import. An import with different IDs is rejected if the configuration is already assigned or has incompatible durable state.
 
-## Set up a separate central PC
+## Set up a central server for multiple collector PCs
+
+Network mode allows multiple collector PCs to send uploads to one Central Server. All collectors use the same central hostname/IP and HTTPS port, while each registered SCADA database source has its own identity, generation and upload credential. Register and export a separate setup for each source; do not reuse one source's setup on unrelated collector PCs. The old **Network server (two PCs)** label described a minimal network example, not a connection limit. The current label is **Network server (multiple collector PCs)**.
 
 1. Install PostgreSQL 17 or 18 and the current Central Server build on the central PC. Open **4 Connection & mode**. Stop an existing running server before changing mode, addresses, ports or storage location.
-2. Choose **Network server (two PCs)**. The listen address defaults to `0.0.0.0`. Use a specific LAN IPv4 address if the server should accept connections only on that adapter.
+2. Choose **Network server (multiple collector PCs)**. The listen address defaults to `0.0.0.0`. Use a specific LAN IPv4 address if the server should accept connections only on that adapter.
 3. Enter the central PC's stable IPv4 or resolvable hostname in **Central PC hostname / IPv4**. Enter only the name/address, without `https://`, a port, or a path. `localhost`, loopback destinations and unspecified destination addresses are rejected in Network mode. Confirm the HTTPS port and the URL preview.
 
    **HTTPS listen IPv4 address** belongs to this server PC, not the collector PC. The current build checks that the address is available locally before saving or starting. Use the server's assigned adapter address, or `0.0.0.0` to listen on all IPv4 adapters. Collectors initiate outbound connections using their imported setup; their IP addresses are only needed separately for network/firewall access rules.
@@ -50,6 +62,8 @@ On the SCADA PC, the operator imports the file into its local collector configur
 6. Register the SCADA source on the central PC, or select an existing source if its registry was migrated. Export its encrypted setup. The export now contains the saved network address and CA certificate; it cannot be exported with a stale certificate for a different address.
 7. On the SCADA PC, open Collector 0.4, import the setup and choose **Test server**. Success confirms the destination, certificate/hostname, upload credential and active source/generation. This test uploads no history and advances no checkpoints. Then test the source database connection and use **Collect now**.
 8. Enable the intended schedule and start automatic collection. Stop the central server briefly during testing, verify that the collector retains pending work, restart it and verify delivery completes. Check both delivery status and central processing/quarantine status.
+
+Repeat source registration, setup export/import and **Test server** for every additional collector PC. Permit each intended collector address, or an approved collector subnet, in the server's HTTPS firewall rule. A rule restricted to one PC permits only that PC; changing the mode label does not expand firewall access. Size and commission the server for the combined upload schedules and history volumes.
 
 Changing a destination requires a fresh export/import; settings do not synchronize in the background. Use the central PC's reachable address, not the SCADA PC's address. A hostname must resolve from the SCADA PC. Changing a server address does not change source/generation IDs.
 

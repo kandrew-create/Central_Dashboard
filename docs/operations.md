@@ -2,7 +2,7 @@
 
 ## Commission locally
 
-Version 0.4 provides **Launch Central Server.cmd** with start/stop, health, registry, **4 Connection & mode** and encrypted collector setup export. Choose Local testing for one PC or Network server for a separate central PC. Collector **3 Collection & upload → Import server setup → Test server** verifies HTTPS and source registration before collection. Follow the [Windows guide](central-server-windows.md) for addresses, certificates and firewall setup. Existing local settings load as Local testing without changing source IDs or data.
+Version 0.4 provides **Launch Central Server.cmd** with start/stop, health, registry, **4 Connection & mode** and encrypted collector setup export. Choose Local testing for one PC or Network server for multiple collector PCs uploading to one central server. Register each SCADA source separately and distribute its own encrypted setup. Collector **3 Collection & upload → Import server setup → Test server** verifies HTTPS and source registration before collection. Follow the [Windows guide](central-server-windows.md) for addresses, certificates and firewall access for every intended collector PC. Existing local settings load as Local testing without changing source IDs or data.
 
 The development environment uses Windows/Python 3.13 and PostgreSQL 17. The local server helper is separate from collector runtime. It creates its own SCRAM-authenticated PostgreSQL cluster on 127.0.0.1:55441 and a verified HTTPS API on 127.0.0.1:8443. Source PostgreSQL remains on its existing port and is never migrated, restored, indexed or modified by these helpers.
 

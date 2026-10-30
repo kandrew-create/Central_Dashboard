@@ -15,7 +15,7 @@ from server.management.service import ManagerService
 from server.management.settings import ServerSettings
 from shared.setup_bundle import decode_setup
 from dataclasses import replace
-from tests.pg_support import PostgresCase,ROOT,uid
+from tests.pg_support import PostgresCase,ROOT,uid,batch_sql,revision_sql
 
 
 @unittest.skipUnless(os.name=='nt','Windows manager DPAPI vault')
@@ -24,6 +24,7 @@ class ManagementIntegrationTests(PostgresCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._run((ROOT/'server/migrations/sql/0002_runtime.sql').read_text(encoding='utf-8'))
+        cls._run((ROOT/'server/migrations/sql/0003_source_deletion.sql').read_text(encoding='utf-8'))
 
     def setUp(self):
         self.directory=tempfile.TemporaryDirectory();self.addCleanup(self.directory.cleanup)
@@ -103,3 +104,53 @@ class ManagementIntegrationTests(PostgresCase):
         document=decode_setup(path.read_bytes(),'a long file password')
         self.assertEqual(document['upload_url'],'https://192.168.10.5:8443/v1/uploads')
         self.assertFalse(document['local_test_only'])
+
+    def test_delete_revokes_all_credentials_hides_only_selected_source_and_blocks_reuse(self):
+        source=self.register()
+        sibling=self.register(customer_id=source['customer_id'],site_id=source['site_id'],
+                              project_id=source['project_id'],machine_id=source['machine_id'])
+        other_customer=self.register()
+        self.service.rotate(source['source_id'])
+        vault=self.service._vault_path(source['source_id']);protected=vault.read_bytes()
+        result=self.service.delete_source(source['source_id'])
+        self.assertEqual(result,{'source_id':source['source_id']})
+        visible={str(row['source_id']) for row in self.service.sources()}
+        self.assertNotIn(source['source_id'],visible)
+        self.assertTrue({sibling['source_id'],other_customer['source_id']}<=visible)
+        with self.service.connection() as db:
+            row=db.execute('SELECT deleted_at FROM platform.sources WHERE source_id=%s',(source['source_id'],)).fetchone()
+            self.assertIsNotNone(row['deleted_at'])
+            self.assertEqual(db.execute('SELECT count(*) n FROM platform.collector_credentials WHERE source_id=%s AND revoked_at IS NULL',(source['source_id'],)).fetchone()['n'],0)
+            self.assertEqual(db.execute('SELECT count(*) n FROM platform.collector_credentials WHERE source_id IN (%s,%s) AND revoked_at IS NULL',(sibling['source_id'],other_customer['source_id'])).fetchone()['n'],2)
+            self.assertEqual(db.execute("SELECT count(*) n FROM platform.audit_log WHERE entity_id=%s AND action='source_deleted'",(source['source_id'],)).fetchone()['n'],1)
+        self.assertEqual(vault.read_bytes(),protected)
+        for operation in (lambda:self.service.rotate(source['source_id']),
+                          lambda:self.service.export(source['source_id'],self.settings.data_dir/'deleted.linker-collector','a long file password'),
+                          lambda:self.service.delete_source(source['source_id'])):
+            with self.assertRaisesRegex(CollectorError,'has been deleted'):operation()
+        self.assertFalse((self.settings.data_dir/'deleted.linker-collector').exists())
+
+    def test_delete_preserves_received_history_generations_and_approved_mappings(self):
+        self._run(batch_sql()+revision_sql()+f"UPDATE platform.mapping_versions SET status='approved',approved_by='test',approved_at=now() WHERE mapping_version_id='{uid(8)}';")
+        tables=('source_generations','mapping_versions','mapping_rules','upload_batches','alarm_event_revisions')
+        def snapshot():
+            with self.service.connection() as db:
+                return {table:db.execute(f'SELECT to_jsonb(t) document FROM platform.{table} t WHERE source_id=%s ORDER BY to_jsonb(t)::text',(uid(6),)).fetchall() for table in tables}
+        before=snapshot()
+        self.service.delete_source(uid(6))
+        self.assertEqual(snapshot(),before)
+
+    def test_delete_failure_rolls_back_registration_credentials_and_audit(self):
+        source=self.register();connection=self.service.connection
+        @contextmanager
+        def failing_commit():
+            with connection() as db:
+                yield db
+                raise ValueError('simulated commit failure')
+        with patch.object(self.service,'connection',failing_commit),self.assertRaises(CollectorError):
+            self.service.delete_source(source['source_id'])
+        with self.service.connection() as db:
+            self.assertIsNone(db.execute('SELECT deleted_at FROM platform.sources WHERE source_id=%s',(source['source_id'],)).fetchone()['deleted_at'])
+            self.assertEqual(db.execute('SELECT count(*) n FROM platform.collector_credentials WHERE source_id=%s AND revoked_at IS NULL',(source['source_id'],)).fetchone()['n'],1)
+            self.assertEqual(db.execute("SELECT count(*) n FROM platform.audit_log WHERE entity_id=%s AND action='source_deleted'",(source['source_id'],)).fetchone()['n'],0)
+        with self.assertRaises(CollectorError):self.service.delete_source(uid(9999))
