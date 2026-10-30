@@ -24,6 +24,7 @@ This repository contains the Linker SCADA Collector and Central Server. Read [RE
 ## Credentials and local state
 
 - Keep passwords, upload tokens, private TLS keys, raw customer records, and operator text out of source control, logs, and release artifacts. Use the existing protected credential and encrypted setup mechanisms.
+- `PC_Station2_1.linker-collector` is an explicitly requested password-encrypted setup export tracked in Git. Keep its unlock password and decrypted contents outside Git; other setup exports remain ignored.
 - Preserve existing collector settings, IDs, checkpoints, pending batches, and central data during routine development. Do not clear state to bypass a fault.
 - `.tools/`, `collector-local/`, `.env`, and DPAPI files contain local operational state. `.tools/` helpers are ignored and may depend on this development PC; do not treat them as portable CI infrastructure.
 - Consult [docs/central-server-windows.md](docs/central-server-windows.md) and [docs/operations.md](docs/operations.md) for commissioning and recovery. Development defaults are central PostgreSQL on loopback port `55441` and HTTPS on `8443`; check saved settings before assuming these values.
@@ -94,4 +95,4 @@ docker compose --env-file .env.example -f deploy/docker-compose.yml config --qui
 
 ## Latest project change
 
-2026-10-29: Prepared revision X2 with current source, tests, commissioning guides and verification reports; updated download links and [release notes](docs/release-X2.md) for the rebuilt Collector/Central Server installers and SHA-256 sidecars. Includes PostgreSQL 17/18, startup/upgrade, registration, save-message and Collector import fixes. X1 assets and local operational state remain unchanged.
+2026-10-29: Added the user-requested encrypted `PC_Station2_1.linker-collector` setup export after validating its envelope format, size and encoding. Its unlock password is excluded; other setup exports remain ignored. Application downloads remain at [revision X2](docs/release-X2.md).
