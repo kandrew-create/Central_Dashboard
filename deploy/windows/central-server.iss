@@ -1,4 +1,4 @@
-#define AppVersion "0.6.1"
+#define AppVersion "0.6.2"
 [Setup]
 AppId={{F120F919-0A43-4AB4-858E-79C2C851D214}
 AppName=Linker Central Server

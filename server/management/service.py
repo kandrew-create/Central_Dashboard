@@ -64,16 +64,18 @@ class ManagerService:
         return save_configuration(self.settings.data_dir, config['model'], False)
 
     @operation
-    def machine_interpretations(self):
+    def machine_interpretations(self,include_records=True):
         from server.machine_ai import configuration
         config = configuration(self.settings.data_dir)
+        if not include_records:
+            return dict(configuration=config,rows=[],records_available=False)
         with self.connection() as db:
             rows = db.execute('''SELECT i.source_record_id,i.source_table,i.status,i.candidates,i.model,i.policy_version,
                 s.name source_name,r.message original_message FROM platform.machine_interpretations i
                 JOIN platform.sources s USING(source_id)
                 JOIN platform.alarm_event_revisions r ON r.revision_id=i.revision_id
                 ORDER BY i.interpreted_at DESC NULLS LAST,i.revision_id LIMIT 200''').fetchall()
-        return dict(configuration=config, rows=rows)
+        return dict(configuration=config,rows=rows,records_available=True)
 
     def __init__(self,settings=None,connection_factory=None):
         self.settings=settings or load_settings()

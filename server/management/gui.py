@@ -32,8 +32,10 @@ class ManagerWindow:
         self.metrics=tk.StringVar(root,'Start the server to view received records and processing status.')
         self.details=tk.StringVar(root,'Select a registered SCADA source to export its collector setup.')
         self.ai_model=tk.StringVar(root,'qwen3:4b')
-        self.ai_status=tk.StringVar(root,'Refresh interpretations to read the saved local AI configuration and results.')
+        self.ai_status=tk.StringVar(root,'Loading saved local AI settings and interpretations...')
         self.ai_rows={}
+        self._ai_saved_model=None
+        self._ai_refresh_pending=False
         s=self.service.settings
         self.data_dir=tk.StringVar(root,str(s.data_dir))
         self.postgres_bin=tk.StringVar(root,str(s.postgres_bin))
@@ -88,6 +90,7 @@ class ManagerWindow:
         self._status_tab(tabs[0]);self._registration_tab(tabs[1]);self._sources_tab(tabs[2])
         self._connection_tab(tabs[3])
         self._ai_tab(tabs[4])
+        self.notebook.bind('<<NotebookTabChanged>>',self._ai_tab_selected)
         self.footer=ttk.Frame(self.root,padding=(24,12))
         self.footer.pack(side='bottom',fill='x',before=outer)
         self.progress=ttk.Progressbar(self.footer,mode='determinate',length=105)
@@ -162,22 +165,41 @@ class ManagerWindow:
                     lambda _:self.refresh_machine_ai())
 
     def refresh_machine_ai(self):
+        def work():
+            status=self.service.status()
+            return self.service.machine_interpretations(include_records=status['database_ready'])
         def shown(result):
-            config=result['configuration'];self.ai_model.set(config['model'])
-            self.ai_status.set(('Enabled' if config['enabled'] else 'Disabled')+
-                ': '+config['model']+'. Suggestions are separate from saved record versions. Refresh to see background results.')
-            children=self.ai_tree.get_children()
-            if children:self.ai_tree.delete(*children)
-            self.ai_rows={}
-            self.show_ai_evidence()
-            for row in result['rows']:
-                labels=', '.join(dict.fromkeys(item['label'] for item in row['candidates']))
-                key=self.ai_tree.insert('','end',values=(row['source_name'],row['source_table'],row['source_record_id'],
-                    row['status'],labels or 'No verified suggestion',
-                    'Registered machine tag' if row.get('policy_version')=='registered-event-machine-v1' else row['model'] or 'Not yet run'))
-                self.ai_rows[key]=row
+            self._show_machine_ai(result)
             self.status_text.set('Local AI interpretations refreshed. Collection and original logs are unchanged.')
-        self._start('Reading local AI interpretation results...',self.service.machine_interpretations,shown)
+        self._start('Reading saved local AI settings and interpretations...',work,shown)
+
+    def _show_machine_ai(self,result):
+        config=result['configuration']
+        if self._ai_saved_model is None or self.ai_model.get().strip()==self._ai_saved_model:
+            self.ai_model.set(config['model'])
+        self._ai_saved_model=config['model']
+        self.ai_status.set(('Enabled' if config['enabled'] else 'Disabled')+': '+config['model']+'. '+
+            ('Saved interpretations loaded. Enable/Disable changes processing; Refresh only reloads results.'
+             if result.get('records_available',True) else
+             'Saved setting retained. Start Central Server to load stored interpretations.'))
+        children=self.ai_tree.get_children()
+        if children:self.ai_tree.delete(*children)
+        self.ai_rows={}
+        self.show_ai_evidence()
+        for row in result['rows']:
+            labels=', '.join(dict.fromkeys(item['label'] for item in row['candidates']))
+            key=self.ai_tree.insert('','end',values=(row['source_name'],row['source_table'],row['source_record_id'],
+                row['status'],labels or 'No verified suggestion',
+                'Registered machine tag' if row.get('policy_version')=='registered-event-machine-v1' else row['model'] or 'Not yet run'))
+            self.ai_rows[key]=row
+        self._ai_refresh_pending=False
+
+    def _ai_tab_selected(self,_=None):
+        if self.closing or self.notebook.index('current')!=4:return
+        if self.busy:
+            self._ai_refresh_pending=True
+        else:
+            self.refresh_machine_ai()
 
     def _connection_tab(self,parent):
         card=self._scroll_card(parent)
@@ -332,6 +354,9 @@ class ManagerWindow:
                 if not self.closing:messagebox.showerror('Central Server',result,parent=self.root)
         if self.closing and not self.busy:
             self.root.destroy();return
+        if not self.busy and self._ai_refresh_pending:
+            self._ai_refresh_pending=False
+            self._ai_tab_selected()
         self.poll_id=self.root.after(80,self._poll)
 
     def _show(self,result,success_message=None):
@@ -352,12 +377,21 @@ class ManagerWindow:
             self.tree.insert('', 'end', iid=key,values=(row['name'],row['customer_name'],row['site_name'],row['project_name'],key,str(row['generation_id'] or ''),str(row['last_received'] or 'No uploads'),row['quarantined_batches']))
         if selected and selected[0] in self.source_rows:self.tree.selection_set(selected[0])
         else:self.selected()
+        if result.get('machine_ai') is not None:
+            self._show_machine_ai(result['machine_ai'])
+        elif result.get('machine_ai_error'):
+            self.ai_status.set(result['machine_ai_error'])
         self.status_text.set(success_message or status['error'] or 'Central Server status refreshed.')
 
     def refresh(self,success_message=None):
         def work():
             status=self.service.status()
-            return dict(status=status,catalog=self.service.catalog() if status['database_ready'] else {k:[] for k in self.registry},sources=self.service.sources() if status['database_ready'] else [])
+            result=dict(status=status,catalog=self.service.catalog() if status['database_ready'] else {k:[] for k in self.registry},sources=self.service.sources() if status['database_ready'] else [])
+            try:
+                result['machine_ai']=self.service.machine_interpretations(include_records=status['database_ready'])
+            except CollectorError as error:
+                result['machine_ai_error']=str(error)
+            return result
         self._start(success_message or 'Reading server health and registered sources...',work,
                     lambda result:self._show(result,success_message))
 

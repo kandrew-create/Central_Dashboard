@@ -1,6 +1,6 @@
 import json
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock,patch
 
 import httpx
 
@@ -9,6 +9,17 @@ from server.machine_ai import LocalModel, model_name
 
 
 class LocalMachineAITests(unittest.TestCase):
+    def test_saved_configuration_is_readable_without_database_or_model_calls(self):
+        from pathlib import Path
+        from server.management.service import ManagerService
+        from server.management.settings import ServerSettings
+        factory=Mock(side_effect=AssertionError('Database access is not needed'))
+        service=ManagerService(ServerSettings(Path('unused-local-settings')),factory)
+        with patch('server.machine_ai.configuration',return_value=dict(enabled=False,model='saved-model')):
+            result=service.machine_interpretations(include_records=False)
+        self.assertEqual(result,dict(configuration=dict(enabled=False,model='saved-model'),rows=[],records_available=False))
+        factory.assert_not_called()
+
     def interpret(self, text, machines, **extra):
         requests = []
         def response(request):

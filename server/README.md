@@ -1,5 +1,7 @@
 # Central Server 0.6.1 — revision X3
 
+The local 0.6.2 update [loads saved AI state and interpretations automatically](../docs/ai-display-refresh.md); enabling AI again is unnecessary. Published X3 downloads below remain 0.6.1.
+
 The new local-AI release adds **5 Local AI** to interpret equipment names from alarm messages on the central PC. Version 0.5.1 identifies events directly from the machine tag selected at source registration; event messages are never sent to AI. Raw records and approved mapping behavior are preserved. See [X3 setup and verification](../docs/release-X3.md). X3 downloads below include Central Server 0.6.1; Collector remains 0.4.0.
 
 Version 0.5.2 separates equipment from the alarm condition (`Conveyor VFD Connect Error` identifies `Conveyor VFD`), rechecks earlier alarm results and shows the original message when a result is selected. Suggestions remain reviewable; literal inclusion in a message alone does not prove an accurate machine name.

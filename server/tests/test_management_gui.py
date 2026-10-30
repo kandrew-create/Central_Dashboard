@@ -63,7 +63,9 @@ class ManagerWindowTests(unittest.TestCase):
         self.service.start.return_value=self.status
         self.service.catalog.return_value={k:[] for k in ('customers','sites','projects','machines')}
         self.service.sources.return_value=[]
-        self.service.machine_interpretations.return_value=dict(configuration=dict(enabled=True,model='qwen3:4b'),rows=[])
+        self.service.machine_interpretations.return_value=dict(configuration=dict(enabled=True,model='qwen3:4b'),
+            rows=[dict(source_name='Fixture SCADA',source_table='alarmhistory',source_record_id=1,status='suggested',
+                       candidates=[dict(label='Oven 1',field='al_message')],model='qwen3:4b')])
         self.app=ManagerWindow(self.root,self.service)
         self.addCleanup(self.destroy)
         self.wait_idle()
@@ -84,6 +86,56 @@ class ManagerWindowTests(unittest.TestCase):
         with patch('server.management.gui.messagebox.askyesno',return_value=True):self.app.stop_server()
         self.wait_idle();self.service.stop.assert_called_once_with()
         self.assertIn('Ready',self.app.health_text.get())
+
+    def test_reopening_loads_saved_ai_state_without_enabling_again(self):
+        self.assertIn('Enabled: qwen3:4b',self.app.ai_status.get())
+        self.assertIn('Oven 1',str(self.app.ai_tree.item(self.app.ai_tree.get_children()[0],'values')))
+        self.service.machine_interpretations.assert_called_with(include_records=True)
+        self.service.enable_machine_ai.assert_not_called()
+        self.service.disable_machine_ai.assert_not_called()
+
+    def test_selecting_ai_tab_loads_disabled_saved_results_without_changing_setting(self):
+        self.service.machine_interpretations.return_value=dict(configuration=dict(enabled=False,model='saved-model'),
+            rows=[dict(source_name='Fixture SCADA',source_table='alarmhistory',source_record_id=1,status='suggested',
+                       candidates=[dict(label='Oven 1',field='al_message')],model='saved-model')])
+        self.app.notebook.select(4);self.root.update();self.wait_idle()
+        self.assertIn('Disabled: saved-model',self.app.ai_status.get())
+        self.assertIn('Oven 1',str(self.app.ai_tree.item(self.app.ai_tree.get_children()[0],'values')))
+        self.service.enable_machine_ai.assert_not_called()
+        self.service.disable_machine_ai.assert_not_called()
+
+    def test_ai_tab_selected_during_work_loads_after_operation_finishes(self):
+        started,release=threading.Event(),threading.Event()
+        self.addCleanup(release.set)
+        def work():
+            started.set();release.wait(3)
+        before=self.service.machine_interpretations.call_count
+        self.app._start('Working...',work,lambda _:None)
+        self.assertTrue(started.wait(1))
+        self.app.notebook.select(4);self.root.update()
+        self.assertEqual(self.service.machine_interpretations.call_count,before)
+        release.set();self.wait_idle()
+        self.assertGreater(self.service.machine_interpretations.call_count,before)
+        self.service.enable_machine_ai.assert_not_called()
+
+    def test_refresh_shows_saved_ai_state_with_stopped_database_and_keeps_unsaved_model(self):
+        self.app.ai_model.set('unsaved-model')
+        self.status.update(api_ready=False,database_ready=False,worker_running=False,error='Central database is stopped.')
+        self.service.machine_interpretations.return_value=dict(configuration=dict(enabled=True,model='qwen3:4b'),rows=[],records_available=False)
+        self.app.refresh();self.wait_idle()
+        self.service.machine_interpretations.assert_called_with(include_records=False)
+        self.assertIn('Enabled: qwen3:4b',self.app.ai_status.get())
+        self.assertIn('Start Central Server',self.app.ai_status.get())
+        self.assertEqual(self.app.ai_model.get(),'unsaved-model')
+        self.assertEqual(self.app.status_text.get(),'Central database is stopped.')
+
+    def test_ai_load_error_does_not_replace_settings_save_confirmation(self):
+        self.service.machine_interpretations.side_effect=CollectorError('Cannot read local AI settings.')
+        with patch('server.management.gui.messagebox.showerror') as error:
+            self.app.refresh('Server settings saved successfully.');self.wait_idle()
+        error.assert_not_called()
+        self.assertEqual(self.app.status_text.get(),'Server settings saved successfully.')
+        self.assertEqual(self.app.ai_status.get(),'Cannot read local AI settings.')
 
     def test_local_ai_enable_refreshes_suggestions_without_starting_or_remapping_server(self):
         self.service.machine_interpretations.return_value['rows']=[dict(source_name='Fixture SCADA',
@@ -246,6 +298,7 @@ class ManagerWindowTests(unittest.TestCase):
         updated=Mock(spec=ManagerService)
         updated.settings=settings
         updated.status.return_value=dict(self.status,upload_url=settings.upload_url)
+        updated.machine_interpretations.return_value=dict(configuration=dict(enabled=False,model='qwen3:4b'),rows=[],records_available=False)
         with patch('server.management.gui.save_settings') as save,patch('server.management.gui.ManagerService',return_value=updated),patch('server.management.gui.messagebox.showerror') as error:
             self.app.save_locations();self.wait_idle()
         save.assert_called_once_with(settings)
