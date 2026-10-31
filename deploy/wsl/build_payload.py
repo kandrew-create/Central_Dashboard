@@ -13,6 +13,7 @@ TOP_FILES = ('pyproject.toml', 'alembic.ini', '.dockerignore')
 DEPLOY_FILES = ('deploy/__init__.py', 'deploy/Dockerfile', 'deploy/requirements.lock',
                 'deploy/wsl/launch-manager.sh', 'deploy/wsl/install-gui.sh',
                 'deploy/wsl/docker-compose.wsl.yml.template', 'deploy/wsl/Caddyfile.local',
+                'deploy/wsl/docker-compose.network.yml.template', 'deploy/wsl/Caddyfile.network',
                 'deploy/docker-compose.yml')
 SOURCE_EXTENSIONS = {'.py', '.sql', '.mako', '.toml'}
 

@@ -96,6 +96,23 @@ class DockerAgentIntegrationTests(PostgresCase):
         self.assertEqual(decode_setup(target.read_bytes(), 'fixture export password')['upload_url'],
                          'https://localhost:9444/v1/uploads')
 
+    def test_network_export_retains_source_identity_and_uses_network_trust_scope(self):
+        source = self.register()
+        vault = self.agent._vault_path(source['source_id'])
+        before = vault.read_bytes()
+        with patch.dict(os.environ, LINKER_MANAGER_MODE='network', LINKER_MANAGER_HOST='192.0.2.10',
+                        LINKER_MANAGER_LISTEN_ADDRESS='0.0.0.0', LINKER_MANAGER_HTTPS_PORT='8443'):
+            self.agent = DockerAgent(self.agent.settings.data_dir, self.agent.ca,
+                                     lambda: psycopg.connect(dbname=self.database, row_factory=dict_row))
+        target = Path(self.directory.name) / 'network.linker-collector'
+        self.agent.export(source['source_id'], target, 'fixture export password')
+        setup = decode_setup(target.read_bytes(), 'fixture export password')
+        self.assertEqual(setup['source_id'], source['source_id'])
+        self.assertEqual(setup['generation_id'], source['generation_id'])
+        self.assertEqual(setup['upload_url'], 'https://192.0.2.10:8443/v1/uploads')
+        self.assertFalse(setup['local_test_only'])
+        self.assertEqual(vault.read_bytes(), before)
+
     def test_invalid_names_are_rejected_before_database_access_and_cross_scope_rolls_back(self):
         factory = self.agent.connection_factory
         self.agent.connection_factory = Mock(side_effect=AssertionError('Database should not be opened'))

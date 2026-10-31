@@ -3,6 +3,7 @@ import argparse
 import contextlib
 import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -108,8 +109,23 @@ def existing_environment(path):
         if '=' in line and not line.lstrip().startswith('#'):
             key, value = line.split('=', 1)
             values[key.strip()] = value.strip().strip('\"\'')
-    if values.get('SCADA_HOSTNAME') != 'localhost':
-        raise SetupError('This installer supports the local WSL deployment. Existing network settings were preserved.')
+    mode = values.get('LINKER_MODE', 'local')
+    host = values.get('SCADA_HOSTNAME', '')
+    listener = values.get('LINKER_LISTEN_ADDRESS', '127.0.0.1')
+    try:
+        address = ipaddress.IPv4Address(listener)
+        try:
+            destination = ipaddress.IPv4Address(host)
+            valid_host = not (destination.is_unspecified or destination.is_multicast or destination.is_loopback)
+        except ValueError:
+            valid_host = bool(re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*', host))
+            valid_host = valid_host and len(host) <= 253 and host != 'localhost' and not host.endswith('.localhost') and not all(c in '0123456789.' for c in host)
+        valid = ((mode == 'local' and host == 'localhost' and listener == '127.0.0.1') or
+                 (mode == 'network' and valid_host and not address.is_loopback and not address.is_multicast))
+        if not valid:
+            raise ValueError()
+    except ValueError:
+        raise SetupError('Saved connection mode, server hostname or listen address is invalid. Existing settings were preserved.') from None
     from urllib.parse import unquote
     for key, user, password in (('MIGRATION_DATABASE_URL', 'scada_migrator', 'POSTGRES_PASSWORD'),
                                 ('INGEST_DATABASE_URL', 'scada_api_login', 'INGEST_DATABASE_PASSWORD'),
@@ -144,6 +160,7 @@ class Installer:
         self.environment_keys = {'POSTGRES_PASSWORD', 'MIGRATION_DATABASE_URL', 'INGEST_DATABASE_URL',
                                  'WORKER_DATABASE_URL', 'INGEST_DATABASE_PASSWORD', 'WORKER_DATABASE_PASSWORD',
                                  'LINKER_HTTP_PORT', 'LINKER_HTTPS_PORT', 'SCADA_HOSTNAME'}
+        self.environment_keys.update(('LINKER_MODE', 'LINKER_LISTEN_ADDRESS'))
 
     def run(self, command, *, payload=None, timeout=900, message='A setup command failed.', env=None):
         environment = {key: value for key, value in os.environ.items() if key not in self.environment_keys
@@ -197,6 +214,7 @@ class Installer:
                 selected = Path(arguments[arguments.index('--workspace') + 1]) if '--workspace' in arguments else self.home / 'central-server'
                 if selected.resolve() == self.workspace.resolve():
                     raise SetupError('Close the manager window for this workspace, then retry setup. No files were replaced.')
+        values = dict(SCADA_HOSTNAME='localhost', LINKER_MODE='local')
         if self.existing:
             values = existing_environment(self.workspace / '.env')
             try:
@@ -227,10 +245,11 @@ class Installer:
             raise SetupError('A management command is still running for this workspace. Wait for it to finish and retry setup.')
         owned_ports = {int(binding['HostPort']) for item in containers if item['state'] == 'running'
                        for bindings in (item['ports'] or {}).values() for binding in bindings or []}
-        for port in (self.args.http_port, self.args.https_port):
+        ports = (self.args.https_port,) if values.get('LINKER_MODE') == 'network' else (self.args.http_port, self.args.https_port)
+        for port in ports:
             with socket.socket() as probe:
                 probe.settimeout(.5)
-                if probe.connect_ex(('127.0.0.1', port)) == 0 and port not in owned_ports:
+                if probe.connect_ex((values['SCADA_HOSTNAME'], port)) == 0 and port not in owned_ports:
                     raise SetupError('A selected localhost port is in use by another application. Choose different ports; no server was stopped.')
         return containers
 
@@ -274,7 +293,8 @@ class Installer:
             raise SetupError('The saved and server CA certificates do not match. Existing trust settings were preserved; inspect the selected Docker volumes.')
         atomic_write(ca_path, ca)
         port = '' if self.args.https_port == 443 else ':' + str(self.args.https_port)
-        request = urllib.request.Request('https://localhost' + port + '/v1/collector-check', data=b'{}',
+        hostname = existing_environment(self.workspace / '.env')['SCADA_HOSTNAME']
+        request = urllib.request.Request('https://' + hostname + port + '/v1/collector-check', data=b'{}',
                                          headers={'Content-Type': 'application/json'})
         try:
             urllib.request.urlopen(request, context=ssl.create_default_context(cafile=str(ca_path)), timeout=10)

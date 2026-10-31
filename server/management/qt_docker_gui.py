@@ -198,7 +198,7 @@ class DockerManagerWindow(QMainWindow):
         rule.setObjectName('sidebarRule')
         side.addWidget(rule)
         side.addSpacing(13)
-        side.addWidget(label('LOCAL ENVIRONMENT', 'sidebarCaption'))
+        side.addWidget(label('NETWORK SERVER' if self.service.settings.mode == 'network' else 'LOCAL ENVIRONMENT', 'sidebarCaption'))
         side.addWidget(label('WSL 2  /  Docker', 'sidebarNote'))
         self.sidebar_status = label('Checking server…', 'sidebarNote')
         side.addWidget(self.sidebar_status)
@@ -221,7 +221,7 @@ class DockerManagerWindow(QMainWindow):
         titles.addWidget(self.page_title)
         titles.addWidget(self.page_subtitle)
         top.addLayout(titles, 1)
-        environment = label('LOCAL  ·  WSL / DOCKER', 'pill')
+        environment = label(('NETWORK' if self.service.settings.mode == 'network' else 'LOCAL') + '  ·  WSL / DOCKER', 'pill')
         top.addWidget(environment, 0, Qt.AlignmentFlag.AlignTop)
         content.addWidget(heading)
         self.pages = QStackedWidget()
@@ -458,10 +458,12 @@ class DockerManagerWindow(QMainWindow):
         row = QHBoxLayout()
         row.addWidget(label('A separate Linux workspace', 'sectionTitle'))
         row.addStretch()
-        row.addWidget(label('LOCAL DEPLOYMENT', 'pill'))
+        row.addWidget(label('NETWORK DEPLOYMENT' if self.service.settings.mode == 'network' else 'LOCAL DEPLOYMENT', 'pill'))
         box.addLayout(row)
         box.addWidget(label('This window manages the Docker server in WSL. Your Windows installation remains separate.', 'muted', True))
-        for title, value in (('Compose project', self.service.settings.project),
+        for title, value in (('Connection mode', 'Network server (multiple collector PCs)' if self.service.settings.mode == 'network' else 'Local testing (one PC)'),
+                             ('HTTPS listen address', self.service.settings.listen_address),
+                             ('Compose project', self.service.settings.project),
                              ('Linux workspace', str(self.service.settings.workspace)),
                              ('Collector endpoint', self.service.settings.upload_url),
                              ('Encrypted setup exports', str(self.service.export_directory))):
@@ -473,9 +475,9 @@ class DockerManagerWindow(QMainWindow):
         layout.addWidget(frame)
         note, box = card()
         box.addWidget(label('Connection & operation', 'sectionTitle'))
-        box.addWidget(label('Keep Docker Desktop running with Ubuntu integration enabled. PostgreSQL is private inside Docker, '
-                            'and HTTPS accepts collectors on this PC.', 'muted', True))
-        box.addWidget(label('Connecting other Collector PCs requires a stable server address, a matching certificate and network commissioning.', 'help', True))
+        box.addWidget(label('Keep Docker Desktop running with Ubuntu integration enabled. PostgreSQL is private inside Docker. '
+                            'Collectors use the endpoint shown above.', 'muted', True))
+        box.addWidget(label('Verify Test server on every intended Collector PC. Network mode requires a matching certificate and firewall access.', 'help', True))
         box.addWidget(label('Closing this window leaves the server running. Stop server pauses this Docker project and preserves its data.', 'help', True))
         layout.addWidget(note)
         layout.addStretch()
@@ -810,7 +812,7 @@ def main(argv=None):
     try:
         service = DockerManagerService(args.workspace, args.project)
     except (CollectorError, OSError, ValueError):
-        QMessageBox.critical(None, 'Central Server - WSL / Docker', 'Cannot open this workspace. Check its private .env, localhost setting and WSL Compose files.')
+        QMessageBox.critical(None, 'Central Server - WSL / Docker', 'Cannot open this workspace. Check its private .env, saved connection mode/address and WSL Compose files.')
         return 1
     window = DockerManagerWindow(service)
     window.show()

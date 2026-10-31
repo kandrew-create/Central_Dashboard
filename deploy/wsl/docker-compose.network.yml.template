@@ -1,0 +1,17 @@
+# Explicit Network mode. Keep database/API ports private and preserve named volumes.
+services:
+  migrate:
+    build: {target: base}
+  provision-runtime:
+    build: {target: base}
+  api:
+    build: {target: base}
+  worker:
+    build: {target: base}
+  caddy:
+    ports: !override
+      - "${LINKER_LISTEN_ADDRESS:?Set approved host IPv4}:${LINKER_HTTPS_PORT:?Set HTTPS port}:443"
+    volumes: !override
+      - ./wsl/Caddyfile.network:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config

@@ -118,7 +118,22 @@ class LinuxSetupTests(unittest.TestCase):
         env.chmod(0o644)
         with self.assertRaises(self.module.SetupError):
             self.module.existing_environment(env)
+        self.assertTrue(env.read_bytes() == data)
+
+    def test_existing_network_endpoint_is_validated_and_preserved(self):
+        workspace = self.home / 'server'
+        workspace.mkdir(mode=0o700)
+        env = workspace / '.env'
+        data = self.module.new_environment(80, 8443).replace(b'SCADA_HOSTNAME=localhost', b'SCADA_HOSTNAME=192.0.2.10')
+        data += b'LINKER_MODE=network\nLINKER_LISTEN_ADDRESS=0.0.0.0\n'
+        self.module.atomic_write(env, data)
+        self.assertEqual(self.module.existing_environment(env)['SCADA_HOSTNAME'], '192.0.2.10')
         self.assertEqual(env.read_bytes(), data)
+        invalid = data.replace(b'LINKER_MODE=network', b'LINKER_MODE=local')
+        self.module.atomic_write(env, invalid)
+        with self.assertRaises(self.module.SetupError):
+            self.module.existing_environment(env)
+        self.assertTrue(env.read_bytes() == invalid)
 
     def test_partial_folder_and_foreign_project_are_preserved(self):
         workspace = self.home / 'server'

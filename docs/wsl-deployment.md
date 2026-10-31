@@ -2,9 +2,9 @@
 
 For guided installation without Windows Python, use the separate [WSL / Docker package installer](wsl-installer.md). It prepares prerequisites, a private Linux GUI environment, the Docker server and its shortcut; the manual/development workflow below remains available.
 
-This development deployment runs Central Server 0.6.2 in Linux containers through Docker Desktop's WSL 2 backend. PostgreSQL, the ingestion API, the worker and Caddy HTTPS run in Linux. The Windows Central Server installation and its operational data remain separate.
+This development deployment runs Central Server 0.6.2 in Linux containers through Docker Desktop's WSL 2 backend. PostgreSQL, the ingestion API, the worker and Caddy HTTPS run in Linux. The Windows Central Server installation and its operational data remain separate. The current WSL deployment uses Network mode with the same endpoint saved by Windows: `https://187.17.53.84:8443/v1/uploads`. The earlier loopback deployment is documented below as installation history.
 
-The native **Central Server - WSL / Docker** management window uses Qt through WSLg, with smooth fonts, sidebar navigation, an overview of service health and saved-record counts, and clear source/setup actions. It controls this Compose project and supports source registration, encrypted collector setup export, credential replacement, confirmed source deletion and saved identification results. Alarm AI and remote collector access are not configured. There is no web dashboard. Mapping approval remains an administration CLI operation; see [Linux operations](operations.md#central-linux-deployment).
+The native **Central Server - WSL / Docker** management window uses Qt through WSLg, with smooth fonts, sidebar navigation, an overview of service health and saved-record counts, and clear source/setup actions. It controls this Compose project and supports source registration, encrypted collector setup export, credential replacement, confirmed source deletion and saved identification results. Alarm AI is not configured. Network mode supports multiple collector PCs; each actual remote PC still needs a successful Collector **Test server** check before commissioning is complete. There is no web dashboard. Mapping approval remains an administration CLI operation; see [Linux operations](operations.md#central-linux-deployment).
 
 ## Open and use the GUI
 
@@ -19,7 +19,7 @@ bash ~/central-server/deploy/wsl/launch-manager.sh
 1. **Overview:** refresh health and saved-record counts, start the Docker services, or stop this project. The overview also shows failed processing jobs, the upload endpoint and a Copy URL action. Closing the window leaves Docker services running. A stopped database remains available to start; opening the GUI does not start services or create sources automatically.
 2. **Register source:** enter customer, site, project, machine tag and SCADA PC/database source name, or select existing registry items. Register each database source separately. Registration creates its IDs and an encrypted local credential without contacting a SCADA database. An unfinished registration is confirmed before closing the window.
 3. **Sources & setup:** select the registered source and export a new `.linker-collector` file with a password of at least 12 characters. The default export folder is `/home/station7/central-server/exports`, accessible in Windows Explorer as `\\wsl.localhost\Ubuntu\home\station7\central-server\exports`. Transfer the file and password separately, then import it into a separately configured Windows Collector. Credential replacement preserves earlier credentials; confirmed deletion revokes credentials while retaining received data and audit history. A refresh preserves the selected identity when it still exists and clears selection when it has been removed.
-4. **Deployment:** shows this project, workspace, local HTTPS endpoint and export folder. Network/listener changes are not presented as Windows PostgreSQL settings; remote access needs separate commissioning.
+4. **Deployment:** shows the saved connection mode, HTTPS listen address, project, workspace, collector endpoint and export folder. Database paths remain managed inside Docker. This page displays the saved configuration; it does not provide editable Windows settings controls.
 5. **Identification:** reads up to 200 saved equipment results with original-message evidence. There are no model-enable controls in this Docker manager, and reading or selecting this page never calls a model. Event identification uses the registered machine tag.
 
 The bottom status message and animated activity indicator remain visible across pages and at minimum window size. Docker/database work runs outside the GUI thread. Optional identification errors stay on that page without replacing successful operation feedback; selecting it during another operation defers its reads. Setup passwords are confirmed and cleared from their input fields after use or cancellation.
@@ -57,7 +57,7 @@ From Windows Explorer, that workspace is available as `\\wsl.localhost\Ubuntu\ho
 
 The dedicated Compose project is `linker-scada-wsl`. Its `.env` contains distinct random migration, API and worker passwords. The Linux workspace is mode 0700 and `.env` is mode 0600, owned by `station7`. The initial staging snapshot, public CA export and Windows management wrapper remain at `%LOCALAPPDATA%\Linker\central-server-wsl` with private Windows ACLs. Do not print `.env`, commit it, or copy it into release artifacts.
 
-The local override `deploy/docker-compose.wsl.yml` replaces the template's published ports with `127.0.0.1:80:80` and `127.0.0.1:443:443`. The database and API have no directly published ports. No LAN firewall or forwarding rules were added.
+The saved override `deploy/docker-compose.wsl.yml` now publishes only `187.17.53.84:8443:443`, matching the Windows HTTPS listener. The initial local override used loopback ports 80/443. The database and API have no directly published ports. The existing Windows firewall allowance is retained; no additional firewall or port-forwarding rule was added.
 
 ## Start, stop and inspect
 
@@ -86,10 +86,10 @@ Container restart policies do not start Docker Desktop itself. Automatic launch 
 
 ## HTTPS and collector setup
 
-The local upload endpoint is:
+The current upload endpoint, matching the saved Windows configuration, is:
 
 ```text
-https://localhost/v1/uploads
+https://187.17.53.84:8443/v1/uploads
 ```
 
 The exported public CA certificate is:
@@ -100,11 +100,11 @@ The exported public CA certificate is:
 
 Configure that file explicitly in a collector connecting to this server. The private CA key remains in the `linker-scada-wsl_caddy-data` volume. Certificate verification must remain enabled. Caddy's local certificate authority and client trust requirements are explained in the [Caddy guide](https://caddyserver.com/docs/automatic-https#local-https).
 
-The HTTPS root and `/health` return 404 through Caddy: the gateway exposes only POST requests to `/v1/uploads` and `/v1/collector-check`. API health is checked internally by Compose. A browser opening `https://localhost/` is not a server-management interface.
+The HTTPS root and `/health` return 404 through Caddy: the gateway exposes only POST requests to `/v1/uploads` and `/v1/collector-check`. API health is checked internally by Compose. A browser opening `https://187.17.53.84:8443/` is not a server-management interface.
 
-This is a fresh database with no registered SCADA sources or uploaded records. Do not redirect an existing collector or replace its IDs, queue or credentials to test the new server. Register each intended source and provision its collector configuration separately, or use a planned migration that preserves the existing identities and receipts.
+This database currently has one registered source and no uploaded records. Do not redirect an existing Windows-assigned collector or replace its IDs, queue or credentials to test this server. Reuse the existing WSL source when appropriate, register each additional database source separately, or use a planned migration that preserves the existing Windows identities and receipts.
 
-For collectors on other PCs, configure an approved stable hostname/address and matching certificate first, then explicitly configure the required network access. `localhost` on a remote collector refers to that collector. WSL NAT/mirrored networking and firewall requirements are described in [Microsoft's networking guide](https://learn.microsoft.com/en-us/windows/wsl/networking). Verify Test server on every actual collector PC before declaring remote operation commissioned.
+For collectors on other PCs, use the current Network endpoint and export that source's setup from WSL. `localhost` on a remote collector refers to that collector. WSL NAT/mirrored networking and firewall requirements are described in [Microsoft's networking guide](https://learn.microsoft.com/en-us/windows/wsl/networking). Verify Test server on every actual collector PC before declaring remote operation commissioned.
 
 The existing Windows database uses PostgreSQL 18; the Compose template uses PostgreSQL 17.6. Never copy the Windows database directory into this container. Moving its records and credentials requires a separate backup/restore and credential recovery procedure.
 
@@ -131,3 +131,30 @@ The default WSL launcher now opens the Qt window with a dark navigation sidebar,
 Eleven Qt workflow checks and eight Docker adapter checks passed on Ubuntu, covering background work, feedback preservation, registration validation/reuse, explicit stop/deletion confirmation, source-selection identity, password handling, export dispatch, original-message evidence and minimum-size navigation. The eleven Qt checks were skipped in the Windows environment because the optional Qt dependency is not installed there; all eleven executed on Ubuntu. The Docker administration layer, database schema and upload protocol are unchanged in this appearance update, so database integration suites were not repeated for it. The Qt dependency remains optional for Windows installations.
 
 Ubuntu's user setup is complete as `station7`; it is separate from Docker Desktop's `docker-desktop` distribution. Both distributions are retained. Do not reset either distribution as routine troubleshooting.
+
+## Match the saved Windows network endpoint
+
+The WSL connection configuration now accepts explicit `LINKER_MODE=network`, `SCADA_HOSTNAME`, `LINKER_LISTEN_ADDRESS` and `LINKER_HTTPS_PORT` values from its private `.env`. Local mode remains the default for a fresh installer. The current saved Windows mode is Network, its host/listener is `187.17.53.84`, and its HTTPS port is 8443. Only these connection settings are matched; the Windows data directory, PostgreSQL binaries, database and identities are not copied into Linux.
+
+For another approved deployment, stop the configured Docker project and close its manager before editing. Back up `.env`, the existing override and `secrets/docker-manager`, alongside database/certificate recovery material. Preserve all database passwords/URLs. Set only the connection fields:
+
+```dotenv
+LINKER_MODE=network
+SCADA_HOSTNAME=187.17.53.84
+LINKER_LISTEN_ADDRESS=187.17.53.84
+LINKER_HTTPS_PORT=8443
+```
+
+The listener must belong to the Windows Docker host. Copy `deploy/wsl/docker-compose.network.yml.template` to `deploy/docker-compose.wsl.yml` after preserving the prior override, validate the selected Compose configuration and rebuild/recreate its containers. This template publishes only HTTPS on that explicit host address; PostgreSQL and API ports remain private. It mounts `deploy/wsl/Caddyfile.network`, which uses the existing Caddy internal CA to issue a certificate for the saved hostname/IP. Certificate verification remains enabled. Docker Desktop forwards published ports through its host backend; see [Docker networking](https://docs.docker.com/desktop/features/networking/) and [publishing to a specific host address](https://docs.docker.com/engine/network/port-publishing/).
+
+The manager and encrypted collector exports use the saved hostname and port. Network exports set `local_test_only=false` and retain the selected source/generation/token; changing an endpoint does not replace source credentials. Setup reruns preserve an existing valid Network configuration and its override. The Caddy network configuration sets [default SNI](https://caddyserver.com/docs/caddyfile/options#default-sni) to the saved host so IP-based clients that omit SNI still receive the matching certificate; hostname/IP verification remains enabled.
+
+The Windows server must remain stopped while WSL owns its endpoint. Preserve its installer and data for recovery. The same URL does not make the two databases interchangeable: the Windows CA, source identities and pending Collector batches are not migrated by a connection change. Do not overwrite a live Collector's assigned IDs/queue to switch servers. Use a planned data/identity migration when continuing an existing Windows-assigned Collector.
+
+### Network verification — 2026-10-31
+
+The change was exercised first on an isolated Docker project and alternate port, including certificate validation, network-mode encrypted setup export and retained source/credential state. The live project was then updated and reopened at `https://187.17.53.84:8443/v1/uploads`. TLS checks passed from Ubuntu and Windows, and an authenticated collector check returned ready without uploading records. Its single source, generation, credential verifier/vault/key, database identity, storage registry, unrelated settings and Caddy CA matched pre-change fingerprints; batches and record versions remain zero. The schema remains at `0009_source_schema_names`.
+
+The existing deployment had stale Docker labels referring to the earlier Windows staging path. Matching credentials and the three expected named volumes were verified before recreating only the stopped project containers with current WSL paths. The owned `secrets` parent was restricted from 0755 to 0700; its protected files were retained. Protected pre-change configuration, credential state, fingerprints and a Central database dump remain under the private Linux `secrets/network-before-*` directory.
+
+Thirty-five Linux installer/adapter/vault/Qt checks passed, including the Network deployment display. Six administration integration checks passed on each disposable PostgreSQL 17 and 18 cluster; nine Windows manager regression checks passed on disposable PostgreSQL 18. Fifteen Windows package/adapter checks passed, with five Linux filesystem checks skipped on Windows and executed on Ubuntu. The rebuilt WSL installer retains this Network configuration; earlier packages remain intact. The existing Windows firewall allowance for HTTPS 8443 from collector PC `187.17.53.218` was retained; no broad firewall rule was added. Connectivity from that actual remote PC remains unverified.

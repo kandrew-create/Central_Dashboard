@@ -30,6 +30,23 @@ class DockerCommandTests(unittest.TestCase):
             self.service._rpc('counts')
         self.assertIn('LINKER_MANAGER_HTTPS_PORT=9444', self.service._run.call_args.args[0])
 
+    def test_network_endpoint_and_mode_are_sent_to_agent_without_changing_identity(self):
+        self.service.settings = DockerSettings(PurePosixPath('/tmp/linux-workspace'), mode='network',
+            server_host='192.0.2.10', listen_address='0.0.0.0', https_port=8443)
+        self.assertEqual(self.service.settings.upload_url, 'https://192.0.2.10:8443/v1/uploads')
+        self.service._run = Mock(return_value=b'{"ok":true,"result":{}}')
+        with patch('server.management.docker.os.getuid', return_value=1000, create=True), patch(
+                'server.management.docker.os.getgid', return_value=1000, create=True):
+            self.service._rpc('counts')
+        command = self.service._run.call_args.args[0]
+        self.assertIn('LINKER_MANAGER_MODE=network', command)
+        self.assertIn('LINKER_MANAGER_HOST=192.0.2.10', command)
+        for changes in (dict(server_host='localhost'), dict(listen_address='127.0.0.1'), dict(server_host='bad/name')):
+            values = dict(server_host='192.0.2.10', listen_address='0.0.0.0')
+            values.update(changes)
+            with self.assertRaises(CollectorError):
+                DockerSettings(PurePosixPath('/tmp/linux-workspace'), mode='network', **values)
+
     def test_controls_use_only_selected_local_project_and_never_remove_volumes(self):
         self.service._services = Mock(return_value={})
         self.service.status = Mock(return_value=dict(api_ready=True, database_ready=True, worker_running=True))

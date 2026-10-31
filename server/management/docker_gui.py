@@ -30,7 +30,7 @@ class DockerManagerWindow(ManagerWindow):
                              ('Setup exports folder', str(self.service.export_directory))):
             ttk.Label(card, text=title, style='Card.TLabel', font=(self.font_family, 10, 'bold')).pack(anchor='w', pady=(12, 3))
             ttk.Label(card, text=value, style='Card.TLabel', wraplength=1000).pack(anchor='w')
-        ttk.Label(card, text='This server accepts collectors on this PC. PostgreSQL stays inside Docker. '
+        ttk.Label(card, text='Collectors use the saved endpoint shown above. PostgreSQL stays inside Docker. '
                   'Register each source and export its encrypted setup from the Sources tab.',
                   style='Card.TLabel', wraplength=1000).pack(anchor='w', pady=20)
         ttk.Label(card, text='Keep Docker Desktop running with Ubuntu integration enabled. '
@@ -54,7 +54,7 @@ class DockerManagerWindow(ManagerWindow):
     def _show(self, result, success_message=None):
         super()._show(result, success_message)
         self.connection_summary.set('WSL / Docker project: ' + self.service.settings.project +
-                                    '. Local testing on this PC. PostgreSQL is private inside Docker.')
+                                    '. Connection mode: ' + self.service.settings.mode + '. PostgreSQL is private inside Docker.')
 
 
 def main(argv=None):
@@ -68,7 +68,7 @@ def main(argv=None):
         root = tk.Tk()
         root.withdraw()
         messagebox.showerror('Central Server - WSL / Docker',
-                             'Cannot open this Docker workspace. Check its private .env, localhost setting and WSL Compose files.', parent=root)
+                             'Cannot open this Docker workspace. Check its private .env, saved connection mode/address and WSL Compose files.', parent=root)
         root.destroy()
         return 1
     os.chdir(service.export_directory)

@@ -10,7 +10,7 @@ from collector.errors import CollectorError
 from server.management.docker import DockerManagerService, DockerSettings
 
 try:
-    from PySide6.QtWidgets import QApplication, QDialog
+    from PySide6.QtWidgets import QApplication, QDialog, QLabel
     from server.management.qt_docker_gui import DockerManagerWindow, ExportPasswordDialog
 except ImportError:
     QApplication = None
@@ -70,6 +70,21 @@ class ModernDockerWindowTests(unittest.TestCase):
         self.assertEqual(self.app.footer.text(), 'Settings saved successfully.')
         self.assertEqual(self.app.ai_note.text(), 'Saved results unavailable')
         self.assertIn('ready', self.app.health_pill.text())
+
+    def test_network_deployment_displays_saved_endpoint_and_connection_mode(self):
+        self.destroy()
+        self.service.settings = DockerSettings(Path(self.directory.name), mode='network',
+            server_host='192.0.2.10', listen_address='0.0.0.0', https_port=8443)
+        self.status['upload_url'] = self.service.settings.upload_url
+        self.app = DockerManagerWindow(self.service)
+        self.app.show()
+        self.wait_idle()
+        self.app.navigate(3)
+        labels = [item.text() for item in self.app.findChildren(QLabel)]
+        self.assertIn('NETWORK DEPLOYMENT', labels)
+        self.assertIn('Network server (multiple collector PCs)', labels)
+        self.assertIn('https://192.0.2.10:8443/v1/uploads', labels)
+        self.assertNotIn('LOCAL DEPLOYMENT', labels)
 
     def test_activity_and_final_failure_message_are_retained(self):
         started, release = threading.Event(), threading.Event()

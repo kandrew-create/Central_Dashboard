@@ -12,7 +12,7 @@ This is an **online installer** for Windows 11 23H2 or newer on x64. First setup
 4. Complete Ubuntu's private username/password prompts and Docker Desktop's first-run prompts when requested. Enable **Settings → Resources → WSL Integration** for the selected Ubuntu distribution. Keep Docker Desktop running, then resume setup.
 5. When ready, click **Open server GUI**. Later, use the desktop shortcut **Central Server - WSL Docker** or Start menu **Central Server GUI**.
 
-The server runs inside Docker; the native Qt window runs through WSLg. See [GUI usage](wsl-deployment.md). This package configures local testing on loopback only. Remote collector access and migration of an existing Windows database require separate commissioning.
+The server runs inside Docker; the native Qt window runs through WSLg. See [GUI usage](wsl-deployment.md). Fresh installation defaults to local testing on loopback. Reruns preserve an existing valid [Network configuration](wsl-deployment.md#match-the-saved-windows-network-endpoint), its hostname/listener and certificate volumes. Remote collector access and migration of an existing Windows database require separate commissioning.
 
 On custom HTTPS port 9444, exported collector setups use `https://localhost:9444/v1/uploads`. HTTP redirects to that HTTPS port. PostgreSQL and the API have no directly published ports. The HTTPS root returns 404 by design.
 

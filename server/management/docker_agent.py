@@ -15,6 +15,7 @@ from psycopg.rows import dict_row
 
 from collector.errors import CollectorError
 from server.management.linux_vault import LinuxVault, private_directory, private_write
+from server.management.docker import DockerSettings
 from server.management.service import ManagerService, text
 
 
@@ -24,11 +25,12 @@ ACTIONS = frozenset(('counts', 'catalog', 'sources', 'register', 'delete_source'
 
 class DockerAgent(ManagerService):
     def __init__(self, state=Path('/manager-state'), ca=Path('/manager-ca.pem'), connection_factory=None):
-        port = int(os.environ.get('LINKER_MANAGER_HTTPS_PORT', '443'))
-        if not 1 <= port <= 65535:
-            raise CollectorError('Invalid local HTTPS port for this Docker manager.')
-        self.settings = SimpleNamespace(data_dir=Path(state), mode='local', server_host='localhost',
-                                        upload_url='https://localhost' + (':' + str(port) if port != 443 else '') + '/v1/uploads')
+        endpoint = DockerSettings(Path('/'), https_port=int(os.environ.get('LINKER_MANAGER_HTTPS_PORT', '443')),
+                                  mode=os.environ.get('LINKER_MANAGER_MODE', 'local'),
+                                  server_host=os.environ.get('LINKER_MANAGER_HOST', 'localhost'),
+                                  listen_address=os.environ.get('LINKER_MANAGER_LISTEN_ADDRESS', '127.0.0.1'))
+        self.settings = SimpleNamespace(data_dir=Path(state), mode=endpoint.mode, server_host=endpoint.server_host,
+                                        upload_url=endpoint.upload_url)
         self.ca = Path(ca)
         self.connection_factory = connection_factory
         self.vault = LinuxVault(state)

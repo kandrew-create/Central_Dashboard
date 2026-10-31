@@ -12,6 +12,7 @@ import httpx
 
 from collector.errors import CollectorError
 from server.management.linux_vault import private_directory, private_read, private_write
+from server.management.settings import ServerSettings
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,12 @@ class DockerSettings:
     database_port: int = 5432
     postgres_bin: Path = Path('Managed inside Docker')
 
+    def __post_init__(self):
+        ServerSettings(self.workspace, self.postgres_bin, mode=self.mode, server_host=self.server_host,
+                       listen_address=self.listen_address).validate_network()
+        if type(self.https_port) is not int or not 1 <= self.https_port <= 65535:
+            raise CollectorError('Choose a valid HTTPS port for the Docker server.')
+
     @property
     def data_dir(self):
         return self.workspace / 'secrets' / 'docker-manager'
@@ -32,7 +39,7 @@ class DockerSettings:
     @property
     def upload_url(self):
         port = '' if self.https_port == 443 else ':' + str(self.https_port)
-        return 'https://localhost' + port + '/v1/uploads'
+        return 'https://' + self.server_host + port + '/v1/uploads'
 
 
 def bind_mount(source, target, readonly=False):
@@ -56,9 +63,8 @@ class DockerManagerService:
                     raise CollectorError('Setup is updating this workspace. Finish setup before opening its manager.') from None
                 fcntl.flock(stream, fcntl.LOCK_UN)
         environment = private_read(workspace / '.env', 16384).decode('utf-8')
-        values = dict(line.split('=', 1) for line in environment.splitlines() if '=' in line and not line.startswith('#'))
-        if values.get('SCADA_HOSTNAME', '').strip().strip('\"\'') != 'localhost':
-            raise CollectorError('This Docker desktop manager supports the commissioned localhost deployment. Configure remote access separately.')
+        values = {key.strip(): value.strip().strip('\"\'') for key, value in
+                  (line.split('=', 1) for line in environment.splitlines() if '=' in line and not line.lstrip().startswith('#'))}
         try:
             https_port = int(values.get('LINKER_HTTPS_PORT', '443'))
             http_port = int(values.get('LINKER_HTTP_PORT', '80'))
@@ -66,11 +72,13 @@ class DockerManagerService:
                 raise ValueError()
         except ValueError:
             raise CollectorError('The saved Docker HTTP and HTTPS ports must be different valid TCP ports.') from None
-        self.settings = DockerSettings(workspace, project, https_port=https_port)
+        self.settings = DockerSettings(workspace, project, mode=values.get('LINKER_MODE', 'local'),
+                                       server_host=values.get('SCADA_HOSTNAME', 'localhost'),
+                                       listen_address=values.get('LINKER_LISTEN_ADDRESS', '127.0.0.1'), https_port=https_port)
         self.config_keys = set(values)
         self.files = [workspace / 'deploy' / name for name in ('docker-compose.yml', 'docker-compose.wsl.yml')]
         if any(not file.is_file() for file in self.files):
-            raise CollectorError('Select the WSL workspace containing its Compose file and loopback override.')
+            raise CollectorError('Select the WSL workspace containing its Compose file and saved deployment override.')
         private_directory(self.settings.data_dir)
         private_write(self.settings.data_dir / 'agent-compose.yml',
                       b'services:\n  migrate:\n    logging: !override\n      driver: none\n')
@@ -87,7 +95,9 @@ class DockerManagerService:
     def _run(self, arguments, payload=None, timeout=90, agent=False):
         environment = {key: value for key, value in os.environ.items()
                        if key not in self.config_keys and not key.startswith('COMPOSE_')
-                       and key not in ('DOCKER_HOST', 'DOCKER_CONTEXT', 'LINKER_HTTP_PORT', 'LINKER_HTTPS_PORT')}
+                       and not key.startswith('LINKER_MANAGER_')
+                       and key not in ('DOCKER_HOST', 'DOCKER_CONTEXT', 'LINKER_HTTP_PORT', 'LINKER_HTTPS_PORT',
+                                       'LINKER_MODE', 'LINKER_LISTEN_ADDRESS', 'SCADA_HOSTNAME')}
         try:
             result = subprocess.run(self._command(arguments), input=payload, capture_output=True,
                                     cwd=self.settings.workspace, env=environment, timeout=timeout)
@@ -105,6 +115,9 @@ class DockerManagerService:
         command = ['-f', str(self.settings.data_dir / 'agent-compose.yml'),
                    'run', '--rm', '--no-deps', '-T', '--user', f'{os.getuid()}:{os.getgid()}',
                    '-e', 'LINKER_MANAGER_HTTPS_PORT=' + str(self.settings.https_port),
+                   '-e', 'LINKER_MANAGER_MODE=' + self.settings.mode,
+                   '-e', 'LINKER_MANAGER_HOST=' + self.settings.server_host,
+                   '-e', 'LINKER_MANAGER_LISTEN_ADDRESS=' + self.settings.listen_address,
                    '--volume', bind_mount(self.settings.data_dir, '/manager-state')]
         if self.ca_path.is_file():
             command += ['--volume', bind_mount(self.ca_path, '/manager-ca.pem', True)]
