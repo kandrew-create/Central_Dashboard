@@ -1,6 +1,7 @@
 .git
 .agents
 .venv
+.venv-gui
 .cache
 .tools
 collector-local

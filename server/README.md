@@ -2,7 +2,7 @@
 
 The local 0.6.2 update [loads saved AI state and interpretations automatically](../docs/ai-display-refresh.md); enabling AI again is unnecessary. Published X3 downloads below remain 0.6.1.
 
-The new local-AI release adds **5 Local AI** to interpret equipment names from alarm messages on the central PC. Version 0.5.1 identifies events directly from the machine tag selected at source registration; event messages are never sent to AI. Raw records and approved mapping behavior are preserved. See [X3 setup and verification](../docs/release-X3.md). X3 downloads below include Central Server 0.6.1; Collector remains 0.4.0.
+The current manager calls the tab **5 Equipment Identification** (**5 Local AI** in earlier builds). An AI model installed on the Central Server PC suggests equipment names from uploaded alarm messages/tags. Results include registered sources on other collector PCs uploading to this server, with each source named in the Source column; the view shows up to 200 results and does not combine separate Central Server databases. Version 0.5.1 identifies events directly from the machine tag selected at source registration; event messages are never sent to AI. Raw records and approved mapping behavior are preserved. See [X3 setup and verification](../docs/release-X3.md). X3 downloads below include Central Server 0.6.1; Collector remains 0.4.0.
 
 Version 0.5.2 separates equipment from the alarm condition (`Conveyor VFD Connect Error` identifies `Conveyor VFD`), rechecks earlier alarm results and shows the original message when a result is selected. Suggestions remain reviewable; literal inclusion in a message alone does not prove an accurate machine name.
 
@@ -29,13 +29,17 @@ PostgreSQL 17 or 18 is a prerequisite for X2. The older X1 installer supports Po
 
 Follow the [Windows setup guide](../docs/central-server-windows.md) for certificates, firewall access and testing from another PC. See [operations and recovery](../docs/operations.md) for Linux deployment, backup, mapping approval and reprocessing.
 
+The source checkout also provides a native **WSL / Docker management GUI** through WSLg: server controls, source registration, encrypted collector setup export and saved identification results. It manages the separate Linux Compose deployment; published Windows installers are unchanged. See [WSL setup and usage](../docs/wsl-deployment.md).
+
+The separate [WSL / Docker online installer](../docs/wsl-installer.md) prepares this deployment and GUI without Windows Python. Build it with `deploy/wsl/build-installer.ps1`; it retains earlier Windows packages and existing Linux settings/data when rerun.
+
 The current source checkout adds **Delete selected source** under **Sources & collector setup**. After confirmation it removes a registration from use, revokes its upload credentials and retains received history and audit records. It works in both operating modes; use a newly rebuilt package for this button because the published X2 installer predates it. See [source deletion](../docs/central-server-windows.md#delete-a-registered-source) for retained data and collector queue behavior.
 
 ## Source layout
 
 | Folder/file | Purpose |
 |---|---|
-| `management/` | Windows setup/status GUI, settings, credentials and process control |
+| `management/` | Windows manager, native WSL/Docker GUI, protected credentials and local process control |
 | `app/` | HTTPS ingestion and authenticated collector connection check |
 | `worker/` | Durable job processing and alarm/event normalization |
 | `migrations/` | PostgreSQL schema and migration history |

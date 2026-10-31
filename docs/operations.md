@@ -18,6 +18,8 @@ The first real-history test was explicitly authorized by the user. It copied the
 
 ## Central Linux deployment
 
+For the isolated Docker Desktop deployment on this Windows development PC, see [Central Server on WSL 2](wsl-deployment.md), including local HTTPS, start/stop commands and verification limits.
+
 Use the same application image for API and worker with separate restricted login credentials. Copy `.env.example` to a protected `.env` and replace every placeholder. Keep passwords high entropy and URL-encode them in connection URLs. API/worker URLs must use the corresponding `scada_api_login`/`scada_worker_login` passwords. Set the approved HTTPS hostname and its DNS first.
 
 ```sh

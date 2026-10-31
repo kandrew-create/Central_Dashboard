@@ -19,6 +19,7 @@ collector = ["httpx>=0.27,<1", "tzdata>=2024.1", "cryptography>=44,<50", "pywin3
 test = ["pytest>=8,<9"]
 local = ["cryptography>=44,<50", "psutil>=6,<8"]
 manager = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "httpx>=0.27,<1", "tzdata>=2024.1", "cryptography>=44,<50", "psutil>=6,<8", "pywin32>=306; sys_platform == 'win32'"]
+docker-gui = ["PySide6-Essentials>=6.8,<7", "httpx>=0.27,<1", "cryptography>=44,<50"]
 build = ["pyinstaller>=6.11,<7"]
 
 [project.scripts]

@@ -16,6 +16,10 @@ MODES={'Local testing (one PC)':'local','Network server (multiple collector PCs)
 
 
 class ManagerWindow:
+    window_title='Central Server - Linker Enterprise'
+    header_detail='Configure local or network operation, register sources and create collector setup files.'
+    font_family='Segoe UI'
+
     def __init__(self,root,service=None):
         self.root=root
         self.service=service or ManagerService()
@@ -48,21 +52,21 @@ class ManagerWindow:
         self.url_preview=tk.StringVar(root)
         self.names={name:tk.StringVar(root) for name in ('customer','site','project','machine','source')}
         self.choices={name:tk.StringVar(root,NEW) for name in ('customer','site','project','machine')}
-        root.title('Central Server - Linker Enterprise')
+        root.title(self.window_title)
         root.geometry('1220x830');root.minsize(1080,750)
         root.protocol('WM_DELETE_WINDOW',self.close)
         style=ttk.Style(root);style.theme_use('clam')
         style.configure('TFrame',background='#f3f6fa')
         style.configure('Card.TFrame',background='white')
-        style.configure('TLabel',background='#f3f6fa',foreground='#17283e',font=('Segoe UI',10))
-        style.configure('Card.TLabel',background='white',foreground='#17283e',font=('Segoe UI',10))
-        style.configure('Title.TLabel',background='white',font=('Segoe UI',15,'bold'))
-        style.configure('TButton',padding=(12,8),font=('Segoe UI',10))
+        style.configure('TLabel',background='#f3f6fa',foreground='#17283e',font=(self.font_family,10))
+        style.configure('Card.TLabel',background='white',foreground='#17283e',font=(self.font_family,10))
+        style.configure('Title.TLabel',background='white',font=(self.font_family,15,'bold'))
+        style.configure('TButton',padding=(12,8),font=(self.font_family,10))
         style.configure('TEntry',padding=6)
         style.configure('TCombobox',padding=6)
-        style.configure('Treeview',rowheight=31,font=('Segoe UI',9))
-        style.configure('Treeview.Heading',font=('Segoe UI',9,'bold'))
-        style.configure('TNotebook.Tab',padding=(18,10),font=('Segoe UI',10,'bold'))
+        style.configure('Treeview',rowheight=31,font=(self.font_family,9))
+        style.configure('Treeview.Heading',font=(self.font_family,9,'bold'))
+        style.configure('TNotebook.Tab',padding=(10,10),font=(self.font_family,10,'bold'))
         style.configure('Horizontal.TProgressbar',background='#2265d7',troughcolor='#e8eef6',borderwidth=0)
         self._build()
         for variable in (self.mode,self.listen_address,self.server_host,self.https_port,self.database_port,self.data_dir,self.postgres_bin):
@@ -79,13 +83,13 @@ class ManagerWindow:
     def _build(self):
         header=tk.Frame(self.root,bg='#12243c',padx=28,pady=20)
         header.pack(fill='x')
-        tk.Label(header,text='LINKER  /  SOFTWARE 2',fg='#a8c9ff',bg='#12243c',font=('Segoe UI',10,'bold')).pack(anchor='w')
-        tk.Label(header,text='Central Server',fg='white',bg='#12243c',font=('Segoe UI',23,'bold')).pack(anchor='w',pady=5)
-        tk.Label(header,text='Configure local or network operation, register sources and create collector setup files.',fg='#c7d4e5',bg='#12243c',font=('Segoe UI',10)).pack(anchor='w')
+        tk.Label(header,text='LINKER  /  SOFTWARE 2',fg='#a8c9ff',bg='#12243c',font=(self.font_family,10,'bold')).pack(anchor='w')
+        tk.Label(header,text='Central Server',fg='white',bg='#12243c',font=(self.font_family,23,'bold')).pack(anchor='w',pady=5)
+        tk.Label(header,text=self.header_detail,fg='#c7d4e5',bg='#12243c',font=(self.font_family,10)).pack(anchor='w')
         outer=ttk.Frame(self.root,padding=22);outer.pack(fill='both',expand=True)
         self.notebook=ttk.Notebook(outer)
         tabs=[ttk.Frame(self.notebook,padding=16) for _ in range(5)]
-        for tab,name in zip(tabs,('1  Server status','2  Register SCADA source','3  Sources & collector setup','4  Connection & mode','5  Local AI')):
+        for tab,name in zip(tabs,('1  Server status','2  Register SCADA source','3  Sources & collector setup','4  Connection & mode','5  Equipment Identification')):
             self.notebook.add(tab,text=name)
         self._status_tab(tabs[0]);self._registration_tab(tabs[1]);self._sources_tab(tabs[2])
         self._connection_tab(tabs[3])
@@ -104,7 +108,7 @@ class ManagerWindow:
     def _status_tab(self,parent):
         card=self._scroll_card(parent)
         ttk.Label(card,text='Server health',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(card,textvariable=self.health_text,style='Card.TLabel',font=('Segoe UI',12,'bold')).pack(anchor='w',pady=(10,6))
+        ttk.Label(card,textvariable=self.health_text,style='Card.TLabel',font=(self.font_family,12,'bold')).pack(anchor='w',pady=(10,6))
         ttk.Label(card,textvariable=self.metrics,style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=4)
         ttk.Label(card,text='Saved record versions includes the first copy of each alarm or event. Unchanged records add nothing. '
                   'Batches awaiting machine mapping are saved and waiting for an approved machine assignment.',
@@ -121,14 +125,22 @@ class ManagerWindow:
 
     def _ai_tab(self,parent):
         card=ttk.Frame(parent,style='Card.TFrame',padding=20);card.pack(fill='both',expand=True)
-        ttk.Label(card,text='Equipment identification',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(card,text='Local AI reads alarm messages/tags on this PC. Events use the machine tag entered at source registration, without AI. '
+        ttk.Label(card,text='Equipment Identification',style='Title.TLabel').pack(anchor='w')
+        ttk.Label(card,text='Uses an AI model installed locally on this Central Server PC to suggest equipment names from alarm messages/tags. '
+                  'Events use the machine tag entered at source registration, without AI. '
                   'Original logs stay unchanged. Equipment names are suggestions; unknown or ambiguous '
                   'machine assignments remain pending approval.',style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=8)
+        ttk.Label(card,text='Shows up to 200 identification results from registered SCADA sources uploading to this server, including other collector PCs. '
+                  'The Source column identifies each source. Records held by separate Central Servers are not shown here.',
+                  style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=4)
         ttk.Label(card,text='Suggested: an AI-proposed alarm name for review. Registered: an event uses the configured machine tag directly. '
                   'Event identification continues when alarm AI is disabled.',style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=4)
         ttk.Label(card,textvariable=self.ai_status,style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=8)
         bar=ttk.Frame(card,style='Card.TFrame');bar.pack(fill='x',pady=8)
+        self._ai_controls(bar)
+        self._ai_results(card)
+
+    def _ai_controls(self,bar):
         ttk.Label(bar,text='Installed Ollama model',style='Card.TLabel').pack(side='left')
         model=ttk.Entry(bar,textvariable=self.ai_model,width=22);model.pack(side='left',padx=8)
         self.controls.append((model,'normal'))
@@ -136,10 +148,12 @@ class ManagerWindow:
         self.button(bar,'Disable',lambda:self._start('Disabling local AI...',self.service.disable_machine_ai,
                     lambda _:self.refresh_machine_ai())).pack(side='left',padx=8)
         self.button(bar,'Refresh interpretations',self.refresh_machine_ai).pack(side='left')
+
+    def _ai_results(self,card):
         columns=('Source','Table','Record ID','Identification','Equipment','Method / model')
         evidence=ttk.Frame(card,style='Card.TFrame');evidence.pack(side='bottom',fill='x',pady=(8,0))
         ttk.Label(evidence,text='Original message — select a result to compare it with the equipment name',style='Card.TLabel').pack(anchor='w')
-        self.ai_evidence=tk.Text(evidence,height=3,wrap='word',state='disabled',font=('Segoe UI',10))
+        self.ai_evidence=tk.Text(evidence,height=3,wrap='word',state='disabled',font=(self.font_family,10))
         evidence_scroll=ttk.Scrollbar(evidence,command=self.ai_evidence.yview)
         self.ai_evidence.configure(yscrollcommand=evidence_scroll.set)
         evidence_scroll.pack(side='right',fill='y');self.ai_evidence.pack(fill='x',expand=True)

@@ -2,7 +2,7 @@
 
 Published revision: **X3** — Central Server **0.6.1** and SCADA Collector **0.4.0**. This revision adds local alarm equipment identification, registered event tags and two native tables per registered source. See [X3 release notes and verification](docs/release-X3.md).
 
-The local 0.6.2 update automatically loads saved AI settings and interpretations when opening the manager or its Local AI tab. It preserves the enabled/disabled choice. See [AI display fix](docs/ai-display-refresh.md); published X3 downloads remain 0.6.1.
+The local 0.6.2 update automatically loads saved AI settings and interpretations when opening the manager or its **Equipment Identification** tab (called **Local AI** in earlier builds). AI runs on the central PC and can identify uploaded records from multiple collector PCs. It preserves the enabled/disabled choice. See [AI display fix](docs/ai-display-refresh.md); published X3 downloads remain 0.6.1.
 
 Download Windows packages and matching SHA-256 checksum files from the [X3 release](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X3). Earlier [X2 packages](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X2) remain available. See the [X3 release notes](docs/release-X3.md) for setup and verification evidence.
 
@@ -20,6 +20,10 @@ Build the Collector with `deploy/windows/build.ps1` and the Central Server with 
 The X2 Central Server supports PostgreSQL 17 and 18, detects installed binaries for new setups, and rejects binaries that do not match an existing database's major version. X2 also checks the local HTTPS listener before startup, handles installed application locks during upgrades, and fixes misleading save/registration messages. The X2 Collector fixes setup import blocked by incomplete upload edits and shows protected-credential status. X1 remains available as an older release. See the [Windows setup guide](docs/central-server-windows.md#storage-and-credentials).
 
 Pending automation work is tracked in the [CI/CD pipeline punchlist](docs/ci-cd-punchlist.md).
+
+For development on Windows with WSL 2 and Docker Desktop, a native Linux management window now provides server controls, source registration and encrypted collector setup export. See [WSL / Docker setup and usage](docs/wsl-deployment.md). This deployment remains separate from the Windows installation.
+
+A separate [WSL / Docker online package installer](docs/wsl-installer.md) prepares prerequisites, private Python/Qt, the server and its GUI shortcut. Build with `deploy/wsl/build-installer.ps1`; outputs and checksums go into a fresh `dist/wsl-docker/0.6.2-*` directory. Existing Windows installers are retained.
 
 Version 0.4 adds Local testing and Network server modes, saved listener/hostname settings, managed matching HTTPS certificates, and an authenticated collector connection test. Collection, durable queueing and encrypted setup export/import remain available. Customer read APIs, the Web Portal, analytics, Grafana, OIDC and notifications remain later phases.
 

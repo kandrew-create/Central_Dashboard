@@ -198,6 +198,23 @@ class ManagerService:
     def _store(self,setup):
         save_password(self._vault_path(setup['source_id']),json.dumps(setup,default=str))
 
+    def _load_setup(self,path):
+        return json.loads(load_password(path))
+
+    def _restore_vault(self,path,content):
+        write_private_file(path,content)
+
+    def _protect_export(self,path):
+        restrict_access(path)
+
+    def _validate_export(self):
+        self.settings.validate_network()
+        from server.management.tls import validate_certificate
+        validate_certificate(self.settings.data_dir,self.settings.server_host,self.settings.listen_address)
+
+    def _export_ca(self):
+        return (self.settings.data_dir/'ca.pem').read_text()
+
     @operation
     def register(self,source_name,customer_name='',site_name='',project_name='',machine_tag='',
                  customer_id=None,site_id=None,project_id=None,machine_id=None):
@@ -257,10 +274,10 @@ class ManagerService:
         if generation is None:raise CollectorError('This source has no active generation.')
         path=self._vault_path(source_id)
         if path.is_file():
-            setup=json.loads(load_password(path))
+            setup=self._load_setup(path)
         else:
             legacy=self.settings.data_dir/'source.dpapi'
-            setup=json.loads(load_password(legacy)) if legacy.is_file() else {}
+            setup=self._load_setup(legacy) if legacy.is_file() else {}
         if setup.get('source_id')!=str(source['source_id']):
             raise CollectorError('No recoverable setup credential is stored here. Rotate the selected source credential before exporting.')
         verifier=hashlib.sha256(setup['upload_token'].encode()).digest()
@@ -282,18 +299,16 @@ class ManagerService:
             raise
 
     def _export(self,source_id,path,password,created):
-        self.settings.validate_network()
-        from server.management.tls import validate_certificate
-        validate_certificate(self.settings.data_dir,self.settings.server_host,self.settings.listen_address)
+        self._validate_export()
         with self.connection() as db:
             setup=self._setup(db,source_id)
             document=dict(version=1,source_id=setup['source_id'],generation_id=setup['generation_id'],source_name=setup['source_name'],
                           upload_url=self.settings.upload_url,upload_token=setup['upload_token'],
-                          ca_certificate_pem=(self.settings.data_dir/'ca.pem').read_text(),local_test_only=self.settings.mode=='local')
+                          ca_certificate_pem=self._export_ca(),local_test_only=self.settings.mode=='local')
             encoded=encode_setup(document,password)
             with path.open('xb') as stream:
                 created.append(True)
-                restrict_access(path)
+                self._protect_export(path)
                 stream.write(encoded)
                 stream.flush();os.fsync(stream.fileno())
             db.execute("INSERT INTO platform.audit_log(customer_id,actor,action,entity_type,entity_id) VALUES (%s,current_user,'collector_setup_exported','source',%s)",(setup['customer_id'],setup['source_id']))
@@ -307,7 +322,7 @@ class ManagerService:
             return self._rotate(source_id)
         except Exception:
             if previous is None:path.unlink(missing_ok=True)
-            else:write_private_file(path,previous)
+            else:self._restore_vault(path,previous)
             raise
 
     def _rotate(self,source_id):
