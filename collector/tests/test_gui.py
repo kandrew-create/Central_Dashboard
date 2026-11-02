@@ -102,6 +102,35 @@ class DesktopWindowTests(unittest.TestCase):
         self.service.cycle.assert_not_called()
         self.assertIn('Stop the Docker Collector', app.status.get())
 
+    def test_docker_engine_unavailable_is_normal_status_and_keeps_preview(self):
+        app = self.create()
+        app.connected = True
+        app.records = [self.record()]
+        app.tree.insert('', 'end', iid='0', values=(1,))
+        with patch('deploy.collector.control.DockerControl.perform', return_value={
+                'running': False, 'engine_ready': False,
+                'message': 'Docker Desktop is not running. Windows background collection does not require Docker.'}), patch('collector.gui.messagebox.showerror') as alarm:
+            app.docker_action('status')
+            self.wait_idle()
+        alarm.assert_not_called()
+        self.assertTrue(app.connected)
+        self.assertEqual(app.tree.get_children(), ('0',))
+        self.assertTrue(app.docker_start_button.instate(('disabled',)))
+        self.assertTrue(app.docker_stop_button.instate(('disabled',)))
+        self.assertIn('Docker Desktop is not running', app.docker_status.get())
+
+    def test_docker_stop_without_engine_reports_status_without_stopping_native(self):
+        app = self.create()
+        with patch('deploy.collector.control.DockerControl.perform', return_value={
+                'running': False, 'engine_ready': False, 'stop_confirmed': False,
+                'message': 'No Docker stop command was sent. Use the notification icon to stop Windows collection.'}), patch('collector.gui.messagebox.showerror') as alarm:
+            app.docker_action('stop')
+            self.wait_idle()
+        alarm.assert_not_called()
+        self.assertFalse(app.auto_stop.is_set())
+        self.assertFalse(app.cycle_stop.is_set())
+        self.assertIn('No Docker stop command', app.status.get())
+
     def test_connection_and_preview_run_on_a_worker_thread(self):
         app = self.create()
         started, release = threading.Event(), threading.Event()
@@ -301,6 +330,11 @@ class DesktopWindowTests(unittest.TestCase):
         self.assertTrue(app.stop_button.instate(('disabled',)))
         self.assertFalse(app.auto_button.instate(('disabled',)))
         self.assertFalse(app.import_button.instate(('disabled',)))
+
+
+
+
+
 
     def test_closing_signals_a_manual_collection_to_stop(self):
         self.config = replace(self.config, collection_enabled=True)

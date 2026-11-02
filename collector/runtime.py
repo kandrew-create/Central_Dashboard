@@ -1,6 +1,7 @@
 """Local scheduler and single-cycle entry point, shared by GUI, CLI and service."""
 from datetime import datetime, time as daytime, timedelta, timezone
 import logging
+import os
 from logging.handlers import RotatingFileHandler
 import threading
 import time
@@ -42,7 +43,13 @@ def next_occurrence(config, current):
     raise CollectorError('Cannot resolve the next local schedule occurrence.')
 
 
+def require_native_runtime(config):
+    if os.name == 'nt' and (config.path.parent / 'docker-runtime.json').is_file():
+        raise CollectorError('This Collector setup has moved to Docker. Use the Docker Collector manager; its original Windows state is preserved.')
+
+
 def cycle(config, reader=None, client=None, stop=None):
+    require_native_runtime(config)
     state = State(config)
     try:
         with state.lock():
@@ -94,6 +101,7 @@ def status(config):
 def run(config_path, stop=None):
     stop = stop or threading.Event()
     first = load_config(config_path)
+    require_native_runtime(first)
     state = State(first)
     state.close()
     logger = logging.getLogger('collector.runtime.' + str(config_path))

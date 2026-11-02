@@ -33,6 +33,18 @@ services:
     command: [create-key, /run/collector-key/collector.key]
     volumes:
       - collector-key:/run/collector-key
+  manager:
+    <<: *collector
+    profiles: [tools]
+    restart: 'no'
+    logging: {driver: none}
+    entrypoint: [python, -m, collector.docker_agent]
+    environment:
+      COLLECTOR_SECRET_KEY_FILE: /run/collector-key/collector.key
+    volumes:
+      - collector-data:/var/lib/linker-collector
+      - collector-key:/run/collector-key:ro
+    # Local CLI stdin only; no management port or network listener.
 
 volumes:
   collector-data:

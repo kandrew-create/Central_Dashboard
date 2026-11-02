@@ -2,7 +2,7 @@
 
 [Download the X3 SCADA Collector installer](https://github.com/kandrew-create/Central_Dashboard/releases/download/X3/Linker-SCADA-Collector-Setup.exe). [Release notes and checksums](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X3).
 
-The native Windows GUI and CLI provide protected connection setup, bounded previews, automatic collection, durable staging, confirmed delivery and status. A native Windows service wrapper and installer are included. Installation, startup under a dedicated account, and representative customer commissioning still require separate verification.
+The current source GUI manages a single Docker Collector, with protected setup, bounded previews, automatic collection, durable staging, confirmed delivery and status. The published X3 Windows package remains the earlier native application; its service wrapper is retained for existing installations.
 
 ## Desktop use
 
@@ -10,7 +10,7 @@ For the Linux CLI/scheduler, including Docker Desktop on WSL 2, see [Collector W
 
 Open **Launch Collector.cmd**, or run:
 
-The source-checkout GUI uses the Central Server's dark sidebar, light workspace, page headings and persistent activity/status footer. Choose **Connection & setup**, **Alarm & event preview** or **Collection & upload** in the sidebar. Switching pages preserves unsaved edits. This appearance update is available through the source launcher; published X3 packages retain their earlier appearance. The **Docker deployment** page controls the container service in the same window.
+The source-checkout GUI uses the Central Server's dark sidebar, light workspace, page headings and persistent activity/status footer. Choose **Connection & setup**, **Alarm & event preview**, **Collection & upload** or **Docker deployment**. Every page manages the same Docker Collector, including its saved source connection and Linux-protected credentials. Switching pages preserves unsaved edits. The GUI does not start a native Windows or notification-area scheduler.
 
 The Collector uses a navy database-and-upload icon with a teal SCADA signal, drawn for Windows sizes from 16 to 256 pixels. The source window and shortcut share `deploy/collector/collector.ico`; future Windows builds also embed it in executables and the installer. Rebuild the icon and its PNG preview with `deploy/collector/build-icon.ps1` (Windows drawing APIs; no additional dependencies).
 
@@ -18,7 +18,7 @@ After changing the icon, run `deploy/collector/install-shortcut.ps1` to refresh 
 
 The shortcut and Windows GUI share the explicit application identity `Linker.SCADA.Collector`. If Search still shows previous artwork while the Start app list and taskbar show the new icon, reopen Windows Search after its UI process refreshes; changing the icon file alone may leave Search's in-memory image unchanged. The corrected icon was verified in both the Search result list and its large preview.
 
-Refreshing an existing shortcut preserves its selected configuration file when that file still exists. Use **Open settings** to select another saved profile in the current window. Importing a setup for a different source/generation requires a separate profile; it cannot replace the existing identity or queue. See the [WSL setup handoff and connection verification](../deploy/collector-setups/README.md).
+**Reload Docker settings** reloads the single Docker configuration. The location reads `Docker: /var/lib/linker-collector/setup/config.toml`; local Windows profile files are retained as migration evidence, not used for collection. Importing a setup for a different source/generation cannot replace an assigned Docker identity or pending queue. See the [WSL setup handoff and connection verification](../deploy/collector-setups/README.md).
 
 ```powershell
 & .venv/Scripts/python.exe -m collector gui
@@ -28,9 +28,17 @@ Refreshing an existing shortcut preserves its selected configuration file when t
 2. In **Alarm & event preview**, choose **Alarms** or **Events** and click **Load preview**. It verifies the saved database connection and read-only permissions automatically before reading the bounded sample; a separate **Test connection** remains available on **Connection & setup**. **Test server** checks HTTPS upload authentication and does not enable database previews. Save database edits and store any newly entered database password first. Original strings, codes, flags, nullable times and separate milliseconds are preserved. Timezone selection is available in the GUI; unknown, ambiguous and invalid times are flagged without guessed UTC.
 3. On **Collection & upload**, enter the provisioned source/generation IDs and locally approve an initial date range or all history. Choose the privacy policy, resource limits and schedule. Enable collection and save settings.
 4. Enter the fixed HTTPS destination. Public CA verification is the default. An explicit local CA file supports the isolated commissioning server without installing global trust. Store the upload credential, enable upload and save settings.
-5. Use **Collect now**, or **Start automatic collection**. Refresh status for queue usage, last successful upload, latest confirmed source time, next run and errors. **Stop** cancels either a manual run or automatic collection after the current bounded database/network operation, preserving pending uploads. The window reports when stopping completes and restores its controls automatically. Window closing also signals collection to stop and waits for that operation. GUI scheduling ends when the window closes.
+5. Use **Start Collector** to run the saved Docker schedule. **Stop Collector** stops that container normally after bounded work, retaining pending uploads. With it stopped, **Collect now** runs one bounded Docker cycle using the same configuration and queue. Status refreshes while the manager is idle; **Refresh status** is also available. Closing the GUI leaves the scheduled container running. Closing during a manual one-off requests cancellation and waits for bounded work to finish.
 
-Opening settings clears credential entry fields. Editing connection/settings invalidates the preview connection check. External file changes require reopening settings before manual operations. Do not run the GUI scheduler and service together for the same setup; process locks prevent concurrent schedules/cycles.
+Opening settings clears credential entry fields. Editing connection/settings invalidates the preview connection check. External changes require reopening Docker settings before manual operations. Configuration and credentials pass through local Docker CLI stdin, with management-container logging disabled; no administration port or Collector listener is added. Stop the container before importing server setup.
+
+## Background operation with Docker
+
+Start Docker Desktop, then use **Start Collector**. Close the manager whenever desired: the single Docker Collector keeps collecting and uploading on its saved schedule. Reopen the same shortcut to inspect its live status or stop it. No separate Windows tray Collector is needed.
+
+Keep Docker Desktop running; its restart policy resumes the container when the engine restarts, unless the Collector was explicitly stopped. Docker Desktop startup/sign-in behavior remains a host prerequisite. Closing the manager does not start or stop Docker Desktop or change the saved schedule.
+
+On this PC, Docker Desktop host networking reaches the existing loopback SCADA PostgreSQL connection without changing the database listener, permissions or TLS settings. The native identity, full SQLite state, receipts and checkpoints were transferred intact; credentials were re-encrypted with the preserved Linux key. The original native setup and old unassigned Docker setup are retained. A local migration marker blocks accidental reuse of the migrated native runtime. See [Docker deployment and migration](../docs/collector-wsl-docker.md).
 
 ## Collection modes and coverage
 
@@ -54,7 +62,7 @@ Default collection preserves all approved operator fields under `upload_all`. `o
 
 HTTPS uses certificate/hostname verification, fixed locally configured URLs, no redirects or HTTP fallback, and bounded uncompressed JSON receipts. Proxy environment variables are ignored. Authentication/schema/receipt faults use a one-hour retry delay; transient transport faults use bounded exponential backoff. Rotating local logs contain counts and redacted faults, not passwords, raw records or operator text. The collector opens no listener and accepts no cloud commands or configuration.
 
-## CLI
+## CLI (existing native installations)
 
 ```powershell
 & .venv/Scripts/python.exe -m collector init
@@ -93,10 +101,10 @@ In **3 Collection & upload**, use **Import server setup** to load a password-enc
 
 In the current rebuilt Collector, pending edits to the Source ID, Generation ID, HTTPS URL, upload enable flag or upload CA path do not disable import: the selected server setup supplies those fields using the last saved local configuration. This resolves the case where enabling uploads with a blank URL prevents saving and previously disabled import. Unsaved local database/history/schedule changes or a typed unstored database password must still be saved/stored first. New setups explain the required local save when Import is clicked. Busy operations and automatic collection still block import.
 
-After import, the **Upload credential** entry stays blank because the secret is stored with current-user Windows protection. The new credential-status message confirms that a protected credential file is present; **Test server** verifies that it can be unlocked and accepted. Do not enter the setup-file encryption password in the upload-credential field. These UI changes are included in X2; X1 remains an older download.
+After import, the **Upload credential** entry stays blank because the secret is stored in protected credential storage (Linux encryption for Docker; DPAPI in existing native Windows packages). **Test server** verifies that it can be unlocked and accepted. Do not enter the setup-file encryption password in the upload-credential field.
 
 Completed server checks, credential storage and collection-status refreshes now replace their in-progress footer messages, so a successful action does not continue showing “Testing…” or “Protecting…”.
 
 Version 0.4 supports network destinations exported by Central Server **4 Connection & mode**. **Test server** verifies HTTPS, upload credential and the active source/generation without uploading records or advancing state. Source database testing remains a separate **Test connection** action. Use Local testing for one PC and Network server for collectors on other PCs; setup changes require a fresh local import.
 
-Use the single **SCADA Collector - WSL Docker** Start menu shortcut. Its sidebar includes connection setup, source previews, collection/upload and Docker deployment. Docker uses its own saved container configuration and durable queue; the other pages use the saved local Windows setup. Stop local automatic collection before starting Docker. Starting local collection is blocked after the app observes Docker running. The shortcut installer removes obsolete separate manager shortcuts.
+Use the single **SCADA Collector - WSL Docker** Start menu shortcut. Its sidebar manages the same Docker configuration and durable queue throughout. The shortcut installer removes obsolete separate manager shortcuts.

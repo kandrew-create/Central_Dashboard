@@ -2,8 +2,6 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $python = Join-Path $repositoryRoot '.venv\Scripts\pythonw.exe'
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw 'Install the project Python environment before installing the Collector shortcut.' }
-$config = Join-Path $env:ProgramData 'Linker\Collector\config.toml'
-if (-not (Test-Path -LiteralPath $config)) { $config = Join-Path $repositoryRoot 'collector-local\config.toml' }
 # Windows caches icons by path. Give each design a distinct, stable filename
 # so replacing collector.ico cannot leave the Start menu using the old bitmap.
 $iconSource = Join-Path $PSScriptRoot 'collector.ico'
@@ -21,13 +19,8 @@ $null = New-Item -ItemType Directory -Path $folder -Force
 $shortcutPath = Join-Path $folder 'SCADA Collector - WSL Docker.lnk'
 $shortcutExisted = Test-Path -LiteralPath $shortcutPath
 $shortcut = $shell.CreateShortcut($shortcutPath)
-# Refreshing artwork must retain the profile selected for this shortcut.
-if ($shortcut.Arguments -match '^-m collector\.gui --config "([^"]+)"$') {
-    $selectedConfig = $Matches[1]
-    if (Test-Path -LiteralPath $selectedConfig -PathType Leaf) { $config = $selectedConfig }
-}
 $shortcut.TargetPath = $python
-$shortcut.Arguments = '-m collector.gui --config "' + $config + '"'
+$shortcut.Arguments = '-m collector.gui'
 $shortcut.WorkingDirectory = $repositoryRoot
 $shortcut.Description = 'SCADA Collector setup, preview, collection and Docker controls'
 $shortcut.IconLocation = $iconPath + ',0'

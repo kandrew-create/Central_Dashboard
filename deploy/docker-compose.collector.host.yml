@@ -1,0 +1,7 @@
+# Docker Desktop host networking must be enabled for a source on this PC.
+# This preserves localhost source access without changing SCADA listeners/TLS.
+services:
+  collector:
+    network_mode: host
+  manager:
+    network_mode: host

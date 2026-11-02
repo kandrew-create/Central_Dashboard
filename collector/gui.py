@@ -20,6 +20,7 @@ class CollectorWindow:
     def __init__(self, root, config_path, service=None):
         self.root = root
         self.service = service or DesktopService()
+        self.docker_managed = getattr(self.service, 'docker_managed', False) is True
         self.config_path = Path(config_path).resolve()
         self.saved = None
         self.base = default_config(self.config_path)
@@ -28,6 +29,7 @@ class CollectorWindow:
         self.closing = False
         self.loading = False
         self.pending = queue.Queue()
+        self.closed = False
         self.controls = []
         self.records = []
         self.detail_windows = []
@@ -36,6 +38,7 @@ class CollectorWindow:
         self.cycle_stop = threading.Event()
         self.manual_collecting = False
         self.docker_running = False
+        self.docker_engine_ready = None
         self.collection_status = tk.StringVar(root, 'Collection is stopped. Configure and save settings before starting.')
         self.upload_token = tk.StringVar(root)
         self.upload_credential_status = tk.StringVar(root)
@@ -161,8 +164,9 @@ class CollectorWindow:
         toolbar = ttk.Frame(workspace, padding=(24, 6))
         toolbar.pack(fill="x")
         ttk.Label(toolbar, textvariable=self.location, foreground="#607086").pack(side="left", fill="x", expand=True)
-        self._button(toolbar, "New setup…", self.new_setup).pack(side="right", padx=(8, 0))
-        self._button(toolbar, "Open settings…", self.open_settings).pack(side="right")
+        if not self.docker_managed:
+            self._button(toolbar, "New setup…", self.new_setup).pack(side="right", padx=(8, 0))
+        self._button(toolbar, "Reload Docker settings" if self.docker_managed else "Open settings…", self.open_settings).pack(side="right")
         self.footer = ttk.Frame(workspace, padding=(24, 12))
         self.footer.pack(side='bottom', fill='x')
         self.notebook = ttk.Notebook(workspace, style='Sidebar.TNotebook')
@@ -179,9 +183,15 @@ class CollectorWindow:
         docker_card = ttk.Frame(docker_tab, style='Card.TFrame', padding=24)
         docker_card.pack(fill='both', expand=True)
         ttk.Label(docker_card, text='Collector Docker service', style='Title.TLabel').pack(anchor='w')
-        ttk.Label(docker_card, text='Keep Docker Desktop running. Stop local automatic collection before starting Docker.\n'
+        docker_help = ('This window manages the single Docker Collector. Setup, previews, collection and uploads use its saved configuration.\n'
+                       'Keep Docker Desktop running. Closing this manager leaves the Docker Collector running.\n'
+                       'Stop Collector stops the container normally and retains its queue and credentials.' if self.docker_managed else
+                      'Existing native Windows setups are separate from this Docker deployment.\n'
+                  'Keep Docker Desktop running to use Docker collection.\n'
+                  'Stop an existing native Collector before starting Docker.\n'
                   'Docker uses its saved container setup and queue; the other pages show the local Windows setup.\n'
-                  'Closing this window leaves the Docker service running.',
+                  'Closing this window leaves the Docker service running.')
+        ttk.Label(docker_card, text=docker_help,
                   style='Muted.TLabel', wraplength=900).pack(anchor='w', pady=16)
         self.docker_status = tk.StringVar(self.root, 'Choose Refresh to check the Docker service.')
         ttk.Label(docker_card, textvariable=self.docker_status, style='Card.TLabel').pack(anchor='w', pady=12)
@@ -189,7 +199,8 @@ class CollectorWindow:
         docker_bar.pack(fill='x')
         self.docker_start_button = self._button(docker_bar, 'Start Docker Collector', lambda: self.docker_action('start'), primary=True)
         self.docker_start_button.pack(side='left', padx=(0, 8))
-        self._button(docker_bar, 'Stop Docker Collector', lambda: self.docker_action('stop')).pack(side='left', padx=8)
+        self.docker_stop_button = self._button(docker_bar, 'Stop Docker Collector', lambda: self.docker_action('stop'))
+        self.docker_stop_button.pack(side='left', padx=8)
         self._button(docker_bar, 'Refresh', lambda: self.docker_action('status')).pack(side='left', padx=8)
         connection_tab.columnconfigure(0, weight=3)
         connection_tab.columnconfigure(1, weight=2)
@@ -233,7 +244,7 @@ class CollectorWindow:
         self.password_button = self._button(credential, "Store password", self.store_password)
         self.password_button.pack(anchor="w", pady=(12, 8))
         ttk.Label(credential, textvariable=self.password_status, style="Muted.TLabel").pack(anchor="w")
-        ttk.Label(credential, text="Protected for the current Windows account.", style="Muted.TLabel").pack(anchor="w", pady=(5, 0))
+        ttk.Label(credential, text="Protected with the Collector's private Docker key." if self.docker_managed else "Protected for the current Windows account.", style="Muted.TLabel").pack(anchor="w", pady=(5, 0))
 
         health = ttk.Frame(side, style="Card.TFrame", padding=22)
         health.pack(fill="both", expand=True, pady=(16, 0))
@@ -270,9 +281,11 @@ class CollectorWindow:
         from deploy.collector.control import DockerControl
         def shown(result):
             self.docker_running = result['running']
-            self.docker_status.set('Docker Collector is running.' if self.docker_running else 'Docker Collector is stopped. Pending uploads are preserved.')
+            self.docker_engine_ready = result.get('engine_ready', True)
+            self.docker_status.set(result.get('message') or ('Docker Collector is running.' if self.docker_running else 'Docker Collector is stopped. Pending uploads are preserved.'))
             self.status.set(self.docker_status.get())
-        self._start('Updating Collector Docker service…', lambda: DockerControl().perform(action), shown)
+        config = self.saved
+        self._start('Updating Collector Docker service…', lambda: DockerControl(config).perform(action), shown)
 
     def _build_collection(self, parent):
         card = ttk.Frame(parent, style='Card.TFrame', padding=16)
@@ -434,6 +447,8 @@ class CollectorWindow:
         self._collection_message('Stopping after the current bounded operation finishes.')
         self._refresh_actions()
 
+
+
     def _build_preview(self, parent):
         card = ttk.Frame(parent, style="Card.TFrame", padding=20)
         card.pack(fill="both", expand=True)
@@ -488,8 +503,13 @@ class CollectorWindow:
         self.preview_limit.set(str(config.preview_rows))
         self.password.set("")
         self.upload_token.set('')
-        self.location.set(str(config.path))
+        self.location.set('Docker: /var/lib/linker-collector/setup/config.toml' if self.docker_managed else str(config.path))
         self.loading = False
+
+    def _credential_present(self, kind):
+        if self.docker_managed:
+            return self.service.credential_present(self.saved, kind)
+        return (self.saved.password_path if kind == 'database' else self.saved.upload_password_path).is_file()
 
     def _is_dirty(self):
         return self.saved is None or any(self.variables[name].get() != str(getattr(self.saved, name))
@@ -508,7 +528,7 @@ class CollectorWindow:
         for control, state in self.controls:
             control.configure(state="disabled" if self.busy else state)
         saved = not self._is_dirty()
-        has_password = saved and self.saved.password_path.is_file()
+        has_password = saved and self._credential_present('database')
         self.password_button.configure(state="normal" if saved and not self.busy else "disabled")
         self.password_entry.configure(state="normal" if saved and not self.busy else "disabled")
         self.test_button.configure(state="normal" if has_password and not self.password.get() and not self.busy else "disabled")
@@ -516,6 +536,8 @@ class CollectorWindow:
         self.details_button.configure(state="normal" if self.records and not self.busy else "disabled")
         self.save_button.configure(state="normal" if not self.busy and self._is_dirty() else "disabled")
         running = self.auto_thread is not None and self.auto_thread.is_alive()
+        self.docker_start_button.configure(state='normal' if not self.busy and not running and self.docker_engine_ready is not False else 'disabled')
+        self.docker_stop_button.configure(state='normal' if not self.busy and self.docker_engine_ready is not False else 'disabled')
         self.collect_button.configure(state='normal' if saved and self.saved.collection_enabled and not self.busy and not running and not self.password.get() else 'disabled')
         self.auto_button.configure(state='normal' if saved and self.saved.collection_enabled and not self.busy and not running else 'disabled')
         self.stop_button.configure(state='normal' if (running and not self.auto_stop.is_set()) or (self.manual_collecting and not self.cycle_stop.is_set()) else 'disabled')
@@ -525,7 +547,7 @@ class CollectorWindow:
         self.collection_save_button.configure(state='normal' if not self.busy and self._is_dirty() else 'disabled')
         if self.upload_token.get():
             self.upload_credential_status.set('New upload credential entered but not stored. Importing server setup supplies this credential automatically.')
-        elif self.saved is not None and self.saved.upload_password_path.is_file():
+        elif self.saved is not None and self._credential_present('upload'):
             self.upload_credential_status.set('Protected upload credential found. The entry stays blank; use Test server to verify it.')
         else:
             self.upload_credential_status.set('No protected upload credential stored. Import server setup to configure it.')
@@ -567,7 +589,7 @@ class CollectorWindow:
             self.password_status.set("New password entered · click Store password")
             self.status.set("Store the new password before testing the connection.")
         else:
-            available = self.saved is not None and self.saved.password_path.is_file()
+            available = self.saved is not None and self._credential_present('database')
             self.password_status.set("Saved password available" if available else "No saved password")
         self._refresh_actions()
 
@@ -622,7 +644,7 @@ class CollectorWindow:
                 self._collection_message('Automatic collection stopped. Pending uploads are preserved.')
             self._refresh_actions()
         if self.closing and not self.busy and not (self.auto_thread and self.auto_thread.is_alive()):
-            self.root.destroy()
+            self._destroy()
             return
         self.poll_id = self.root.after(80, self._poll)
 
@@ -647,7 +669,7 @@ class CollectorWindow:
             self._clear_preview()
             self._populate(config)
             self.connection_status.set("Not tested")
-            self.password_status.set("Saved password available" if config.password_path.is_file() else "No saved password")
+            self.password_status.set("Saved password available" if self._credential_present('database') else "No saved password")
             self.status.set("Settings opened. Test the connection before loading a preview.")
 
         self._start("Opening local settings…", lambda: self.service.load(path), loaded)
@@ -697,7 +719,7 @@ class CollectorWindow:
             self.connected = False
             self._clear_preview()
             self._populate(result)
-            self.password_status.set("Saved password available" if result.password_path.is_file() else "No saved password")
+            self.password_status.set("Saved password available" if self._credential_present('database') else "No saved password")
             self.connection_status.set("Not tested")
             self.status.set("Settings saved. Store a password, then test the connection.")
 
@@ -738,7 +760,7 @@ class CollectorWindow:
         self._start("Testing database connection and table permissions…", lambda: self.service.check(config), checked)
 
     def load_preview(self):
-        if self.busy or self._is_dirty() or self.password.get() or not self.saved.password_path.is_file():
+        if self.busy or self._is_dirty() or self.password.get() or not self._credential_present('database'):
             return
         try:
             limit = int(self.preview_limit.get())
@@ -813,6 +835,10 @@ class CollectorWindow:
         if self._has_unsaved_edits():
             if not messagebox.askyesno("Unsaved settings", "Close without saving connection changes?", parent=self.root):
                 return
+        self._destroy()
+
+    def _destroy(self):
+        self.closed = True
         self.password.set("")
         self.root.after_cancel(self.poll_id)
         self.upload_token.set('')
@@ -820,18 +846,10 @@ class CollectorWindow:
 
 
 def launch(config_path):
-    if sys.platform == 'win32':
-        import ctypes
-        # Match the Start menu shortcut rather than the shared Python host.
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Linker.SCADA.Collector')
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        print("Collector: A Windows desktop session with Tk is required.", file=sys.stderr)
-        return 1
-    CollectorWindow(root, config_path)
-    root.mainloop()
-    return 0
+    from collector.docker_gui import launch as launch_docker
+    return launch_docker(config_path)
+
+
 
 
 def main(argv=None):

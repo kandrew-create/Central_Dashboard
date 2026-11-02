@@ -82,6 +82,9 @@ def require_current(config):
 
 
 class DesktopService:
+    def credential_present(self, config, kind):
+        return (config.password_path if kind == 'database' else config.upload_password_path).is_file()
+
     def check_upload(self, config):
         require_current(config)
         from collector.connection import check_upload
