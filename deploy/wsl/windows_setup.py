@@ -117,7 +117,7 @@ class Setup:
         try:
             manifest = json.loads((self.bundle / 'package.json').read_text(encoding='utf-8'))
             required = {'payload/application.tar.gz', 'payload/application-manifest.json', 'payload/linux_setup.py',
-                        'payload/prerequisites.json', 'payload/uv-linux.tar.gz', 'linker-wsl-setup.exe'}
+                        'payload/prerequisites.json', 'payload/uv-linux.tar.gz', 'linker-wsl-setup.exe', 'central-server.ico'}
             if manifest.get('format') != 1 or not required.issubset(manifest['files']):
                 raise ValueError()
             for name, expected in manifest['files'].items():
@@ -259,8 +259,9 @@ class Setup:
     def install_shortcut(self):
         if not getattr(sys, 'frozen', False):
             return
-        script = "$s=New-Object -ComObject WScript.Shell; $p=Join-Path ([Environment]::GetFolderPath('Desktop')) 'Central Server - WSL Docker.lnk'; $l=$s.CreateShortcut($p); $l.TargetPath=$env:LINKER_SETUP_EXE; $l.Arguments='--launch'; $l.Description='Linker Central Server in WSL and Docker'; $l.Save()"
-        self.run(['powershell.exe', '-NoProfile', '-Command', script], environment=dict(os.environ, LINKER_SETUP_EXE=sys.executable))
+        script = "$s=New-Object -ComObject WScript.Shell; $p=Join-Path ([Environment]::GetFolderPath('Desktop')) 'Central Server - WSL Docker.lnk'; $l=$s.CreateShortcut($p); $l.TargetPath=$env:LINKER_SETUP_EXE; $l.Arguments='--launch'; $l.Description='Linker Central Server in WSL and Docker'; $l.IconLocation=$env:LINKER_SETUP_ICON+',0'; $l.Save()"
+        self.run(['powershell.exe', '-NoProfile', '-Command', script], environment=dict(os.environ,
+                 LINKER_SETUP_EXE=sys.executable, LINKER_SETUP_ICON=str(self.bundle / 'central-server.ico')))
 
     def launch(self, wait=False):
         configuration = self.saved_configuration()

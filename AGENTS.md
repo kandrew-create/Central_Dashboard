@@ -99,6 +99,8 @@ The WSL deployment uses Docker Desktop, project `linker-scada-wsl`, and `/home/s
 
 Docker manager startup reports safe engine/HTTPS-port/mount errors. A Caddyfile mount failure with an existing configuration file permits one gateway-only recreation and readiness retry, preserving named volumes. Never retry credential mutations or timeouts automatically, stop Windows processes by name, or change the saved endpoint to bypass a conflict. Check bound sockets as well as listeners when diagnosing port conflicts. See [startup recovery](docs/wsl-deployment.md#startup-errors-and-recovery).
 
+The WSL Windows launcher bundles and verifies `deploy/wsl/central-server.ico`; its shortcuts and installer use this independent icon. Never reference the separate Windows server executable for a WSL shortcut icon. See [installer guide](docs/wsl-installer.md).
+
 ## Working conventions
 
 - Build the separate online WSL/Docker installer with `deploy/wsl/build-installer.ps1`; use fresh `dist/wsl-docker/0.6.2-*` outputs and checksums, preserving Windows packages. Package only allowlisted application files and verified setup tools. Retain saved ports, `.env`, Linux vaults and named volumes; stop only the selected project before code replacement and recreate containers to refresh WSL mounts. Test fresh setup/reruns on disposable workspaces/projects, never by resetting operational state. See [installer guide](docs/wsl-installer.md).
@@ -115,4 +117,4 @@ Docker manager startup reports safe engine/HTTPS-port/mount errors. A Caddyfile 
 
 ## Latest project change
 
-2026-11-02: Consolidated Collector setup, previews, collection/upload and Docker controls into one SCADA Collector - WSL Docker window and Start menu shortcut, with Central Server-style sidebar and matching icon. Saved configurations and queues remain intact. Retained the authorized encrypted WSL setup handoff and its protected password outside Git; see [handoff](deploy/collector-setups/README.md). Actual remote Collector authentication/upload remains unverified. See [Collector usage](collector/README.md).
+2026-11-02: Added an independent Central Server icon to WSL installer sources, package verification and desktop/Start menu shortcuts, so removing the older Windows application cannot break its icon. The local WSL desktop shortcut is repaired; existing installers require rebuilding to include the asset. Retained the concurrent unified Collector GUI/control update, saved state and authorized encrypted setup handoff. Actual remote Collector authentication/upload remains unverified. See [installer guide](docs/wsl-installer.md), [Collector usage](collector/README.md) and [handoff](deploy/collector-setups/README.md).

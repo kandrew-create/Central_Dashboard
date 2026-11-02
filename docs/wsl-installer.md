@@ -14,6 +14,8 @@ This is an **online installer** for Windows 11 23H2 or newer on x64. First setup
 
 The server runs inside Docker; the native Qt window runs through WSLg. See [GUI usage](wsl-deployment.md). Fresh installation defaults to local testing on loopback. Reruns preserve an existing valid [Network configuration](wsl-deployment.md#match-the-saved-windows-network-endpoint), its hostname/listener and certificate volumes. Remote collector access and migration of an existing Windows database require separate commissioning.
 
+New builds bundle `central-server.ico` beside the Windows launcher, include it in checksum verification and use it for the launcher, installer, desktop shortcut and Start menu entries. The icon matches the WSL manager's blue server symbol and does not depend on the separate Windows Central Server installation. On the development PC, the existing WSL desktop shortcut was repaired with its own copy under `%LOCALAPPDATA%\Linker\central-server-wsl\central-server.ico`; the application it previously used for its icon had been uninstalled. Press **F5** on the desktop if Explorer still shows the cached blank icon. Earlier installer packages are unchanged until rebuilt.
+
 On custom HTTPS port 9444, exported collector setups use `https://localhost:9444/v1/uploads`. HTTP redirects to that HTTPS port. PostgreSQL and the API have no directly published ports. The HTTPS root returns 404 by design.
 
 ## Rerun, upgrade and uninstall

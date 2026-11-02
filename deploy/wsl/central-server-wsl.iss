@@ -20,7 +20,8 @@ SolidCompression=yes
 WizardStyle=modern
 DisableProgramGroupPage=yes
 UninstallDisplayName=Linker Central Server - WSL Docker (Windows launcher)
-UninstallDisplayIcon={app}\linker-wsl-setup.exe
+UninstallDisplayIcon={app}\central-server.ico
+SetupIconFile={#PackageSource}\central-server.ico
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
@@ -29,8 +30,8 @@ SetupLogging=yes
 Source: "{#PackageSource}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Finish WSL Docker Setup"; Filename: "{app}\linker-wsl-setup.exe"; WorkingDir: "{app}"
-Name: "{group}\Central Server GUI"; Filename: "{app}\linker-wsl-setup.exe"; Parameters: "--launch"; WorkingDir: "{app}"
+Name: "{group}\Finish WSL Docker Setup"; Filename: "{app}\linker-wsl-setup.exe"; WorkingDir: "{app}"; IconFilename: "{app}\central-server.ico"
+Name: "{group}\Central Server GUI"; Filename: "{app}\linker-wsl-setup.exe"; Parameters: "--launch"; WorkingDir: "{app}"; IconFilename: "{app}\central-server.ico"
 
 [Run]
 Filename: "{app}\linker-wsl-setup.exe"; Description: "Set up WSL, Docker and the Central Server"; Flags: nowait postinstall skipifsilent

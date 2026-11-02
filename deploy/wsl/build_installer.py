@@ -37,6 +37,7 @@ def main():
     bundle = staging / 'bundle'
     payload = bundle / 'payload'
     payload.mkdir(parents=True)
+    shutil.copyfile(root / 'deploy/wsl/central-server.ico', bundle / 'central-server.ico')
     build(root, payload)
     for name in ('linux_setup.py', 'prerequisites.json'):
         shutil.copyfile(root / 'deploy/wsl' / name, payload / name)
@@ -47,6 +48,7 @@ def main():
     archive = safe_download(uv['url'], uv['sha256'], cache / ('uv-' + uv['version'] + '.tar.gz'))
     shutil.copyfile(archive, payload / 'uv-linux.tar.gz')
     command = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--noconsole',
+               '--icon', str(bundle / 'central-server.ico'),
                '--name', 'linker-wsl-setup', '--distpath', str(bundle), '--workpath', str(staging / 'pyinstaller'),
                '--specpath', str(staging), str(root / 'deploy/wsl/windows_setup.py')]
     log = staging / 'pyinstaller.log'

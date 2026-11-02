@@ -39,7 +39,7 @@ class PackageTests(unittest.TestCase):
             with self.assertRaises(windows_setup.SetupError):
                 setup.verify_package()
             names = ('payload/application.tar.gz', 'payload/application-manifest.json', 'payload/linux_setup.py',
-                     'payload/prerequisites.json', 'payload/uv-linux.tar.gz', 'linker-wsl-setup.exe')
+                     'payload/prerequisites.json', 'payload/uv-linux.tar.gz', 'linker-wsl-setup.exe', 'central-server.ico')
             manifest = dict(format=1, application_version='test', files={})
             for name in names:
                 path = bundle / name
