@@ -84,6 +84,24 @@ Direct commands from a PowerShell window opened before Docker installation may n
 
 Container restart policies do not start Docker Desktop itself. Automatic launch at Windows sign-in has not been commissioned. After a restart, open Docker Desktop, then use `Start` and check `Status`.
 
+### Startup errors and recovery
+
+The updated WSL manager distinguishes an unreachable Docker engine, an unavailable HTTPS host address/port and a failed gateway configuration mount. It displays safe recovery instructions without displaying native Docker output or credentials. Open Docker Desktop and wait for its engine before using **Start Docker server**; enable its Ubuntu integration if the engine remains unreachable.
+
+When HTTPS cannot be published, confirm the saved listener belongs to the Windows host and check every socket bound to the saved port, including sockets that are not listening. On this PC the Windows Central Server and WSL project share port 8443. Use **Stop server** in the Windows manager before starting WSL. The installed supported equivalent is:
+
+```powershell
+& 'C:\Program Files\Linker\Central Server\central-server.exe' --component stop
+```
+
+Do not terminate processes by name or stop an unrelated PostgreSQL service. The WSL manager does not automatically stop the Windows installation or change the saved endpoint.
+
+Docker Desktop can retain a stale WSL bind mount after a restart. If startup reports a mount error for `/etc/caddy/Caddyfile` and the expected local/network Caddyfile still exists, the updated manager recreates only this project's Caddy container once and retries normal startup/readiness checks. Named database and certificate volumes remain intact. A missing file or repeated failure still reports an error; restore the correct workspace configuration before retrying. Timeouts and credential/database operations are not automatically retried by this recovery.
+
+On 2026-11-01, recovery of this PC required starting Docker Desktop, refreshing the gateway mount and stopping the configured Windows server that had HTTPS bound without listening. Subsequent checks confirmed database/API/worker readiness, authenticated collector-check acceptance, Windows certificate validation, unchanged database identity, source/credential state, CA and unrelated settings. There were still one source, zero batches and zero record versions. Actual remote Collector communication remains unverified.
+
+The startup patch passed 14 Docker adapter/boundary checks on Windows and 29 adapter/Tk/Qt workflow checks on Ubuntu, with no skips in those runs. These cover specific safe errors, one gateway-only recovery attempt, missing configuration, failure cleanup and preservation of already-running components. No schema/protocol changes or PostgreSQL compatibility changes were made, so disposable database suites were not repeated for this patch. Repository changes must also be copied into the separate WSL workspace; reopen an existing manager window to load updated Python code.
+
 ## HTTPS and collector setup
 
 The current upload endpoint, matching the saved Windows configuration, is:

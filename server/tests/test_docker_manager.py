@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from collector.errors import CollectorError
-from server.management.docker import DockerManagerService, DockerSettings, bind_mount
+from server.management.docker import DockerManagerService, DockerSettings, GatewayMountError, bind_mount
 from server.management.docker_agent import main
 
 
@@ -83,6 +83,59 @@ class DockerCommandTests(unittest.TestCase):
         self.assertNotIn('DOCKER_HOST', environment)
         self.assertNotIn('COMPOSE_PROJECT_NAME', environment)
         self.assertNotIn('shell', runner.call_args.kwargs)
+
+    def test_known_startup_errors_explain_recovery_without_echoing_native_details(self):
+        cases = (
+            (b'Cannot connect to the Docker daemon at unix:///var/run/docker.sock', 'Start Docker Desktop'),
+            (b"The command 'docker' could not be found in this WSL 2 distro", 'Ubuntu integration'),
+            (b'ports are not available: /forwards/expose returned unexpected status: 500', 'Stop server'),
+            (b'bind: Only one usage of each socket address is normally permitted', 'Stop server'),
+            (b'error mounting private-path to rootfs at /etc/caddy/Caddyfile: not a directory', 'mount failed'),
+        )
+        for detail, expected in cases:
+            with self.subTest(detail=detail), patch('server.management.docker.subprocess.run', return_value=
+                    subprocess.CompletedProcess([], 1, b'private-record', detail + b' password=secret-sentinel')):
+                with self.assertRaisesRegex(CollectorError, expected) as caught:
+                    self.service._run(['up', '-d'])
+                self.assertNotIn('secret-sentinel', str(caught.exception))
+                self.assertNotIn('private', str(caught.exception))
+
+    def test_stale_gateway_mount_recreates_only_gateway_and_keeps_readiness_check(self):
+        caddyfile = self.service.settings.workspace / 'deploy/wsl/Caddyfile.local'
+        caddyfile.parent.mkdir(parents=True)
+        caddyfile.write_text('https://localhost {}')
+        self.service._services = Mock(return_value={})
+        self.service._run = Mock(side_effect=[GatewayMountError('stale mount'), b'', b''])
+        self.service.status = Mock(return_value=dict(api_ready=True, database_ready=True, worker_running=True))
+        self.assertTrue(self.service.start()['api_ready'])
+        commands = [call.args[0] for call in self.service._run.call_args_list]
+        self.assertEqual(commands, [
+            ['up', '-d', '--wait', '--wait-timeout', '180'],
+            ['up', '-d', '--no-deps', '--force-recreate', 'caddy'],
+            ['up', '-d', '--wait', '--wait-timeout', '180'],
+        ])
+        self.service.status.assert_called_once()
+
+    def test_missing_gateway_file_is_not_recreated_and_new_components_are_cleaned(self):
+        self.service._services = Mock(return_value={})
+        self.service._run = Mock(side_effect=[GatewayMountError('missing mount'), b'', b''])
+        with self.assertRaisesRegex(GatewayMountError, 'missing mount'):
+            self.service.start()
+        self.assertEqual([call.args[0] for call in self.service._run.call_args_list[1:]], [
+            ['stop', '--timeout', '15', 'api'], ['stop', '--timeout', '15', 'worker']])
+
+    def test_gateway_mount_recovery_is_attempted_once_and_preserves_running_components(self):
+        self.service.settings = DockerSettings(self.service.settings.workspace, mode='network',
+            server_host='192.0.2.10', listen_address='192.0.2.10', https_port=8443)
+        caddyfile = self.service.settings.workspace / 'deploy/wsl/Caddyfile.network'
+        caddyfile.parent.mkdir(parents=True)
+        caddyfile.write_text('https://{$SCADA_HOSTNAME} {}')
+        self.service._services = Mock(return_value={'api': {'State': 'running'}, 'worker': {'State': 'running'}})
+        self.service._run = Mock(side_effect=GatewayMountError('still broken'))
+        with self.assertRaisesRegex(GatewayMountError, 'still broken'):
+            self.service.start()
+        self.assertEqual(self.service._run.call_count, 2)
+        self.assertEqual(self.service._run.call_args.args[0], ['up', '-d', '--no-deps', '--force-recreate', 'caddy'])
 
     def test_password_is_sent_only_over_stdin_and_mounts_preserve_commas(self):
         self.service.settings = DockerSettings(PurePosixPath('/tmp/linux-workspace'))

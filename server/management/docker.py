@@ -48,6 +48,10 @@ def bind_mount(source, target, readonly=False):
     return str(source) + ':' + target + (':ro' if readonly else ':rw')
 
 
+class GatewayMountError(CollectorError):
+    """A failed Caddyfile mount can be recovered by recreating only the gateway."""
+
+
 class DockerManagerService:
     def __init__(self, workspace, project='linker-scada-wsl'):
         if os.name != 'posix' or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,62}', project):
@@ -108,6 +112,22 @@ class DockerManagerService:
         if len(result.stdout) > 4 * 1024 * 1024:
             raise CollectorError('Docker management returned too much data. No response was displayed.')
         if result.returncode and not agent:
+            # Classify known faults without displaying native output, which may contain secrets.
+            detail = (result.stdout + result.stderr).lower()
+            if any(marker in detail for marker in (
+                    b'cannot connect to the docker daemon', b'is the docker daemon running',
+                    b'failed to connect to the docker api', b'could not be found in this wsl 2 distro')):
+                raise CollectorError('Docker Desktop is not reachable. Start Docker Desktop, wait for its engine, '
+                                     'and enable Ubuntu integration, then refresh and retry.')
+            if any(marker in detail for marker in (
+                    b'ports are not available', b'address already in use', b'only one usage of each socket address')):
+                raise CollectorError(f'Cannot publish HTTPS at {self.settings.listen_address}:{self.settings.https_port}. '
+                                     'Check that this address belongs to the Windows host and the port is free. '
+                                     'If Windows Central Server uses the same endpoint, use its Stop server action '
+                                     'before starting WSL/Docker. Existing data is retained.')
+            if b'/etc/caddy/caddyfile' in detail and b'error mounting' in detail:
+                raise GatewayMountError('The HTTPS gateway configuration mount failed. Check the saved Caddyfile '
+                                        'in this WSL workspace; existing data and certificates are retained.')
             raise CollectorError('Docker operation failed. Check Docker Desktop and the selected WSL project; existing data is retained.')
         return result.stdout
 
@@ -183,7 +203,17 @@ class DockerManagerService:
     def start(self):
         before = self._services()
         try:
-            self._run(['up', '-d', '--wait', '--wait-timeout', '180'], timeout=240)
+            try:
+                self._run(['up', '-d', '--wait', '--wait-timeout', '180'], timeout=240)
+            except GatewayMountError:
+                caddyfile = self.settings.workspace / 'deploy' / 'wsl' / (
+                    'Caddyfile.network' if self.settings.mode == 'network' else 'Caddyfile.local')
+                if not caddyfile.is_file():
+                    raise
+                # Docker Desktop can retain a stale WSL file mount after a restart.
+                # Recreate only Caddy, retaining its named certificate/configuration volumes.
+                self._run(['up', '-d', '--no-deps', '--force-recreate', 'caddy'], timeout=90)
+                self._run(['up', '-d', '--wait', '--wait-timeout', '180'], timeout=240)
             for attempt in range(3):
                 result = self.status()
                 if all(result[key] for key in ('api_ready', 'database_ready', 'worker_running')):
