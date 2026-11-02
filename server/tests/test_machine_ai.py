@@ -9,6 +9,12 @@ from server.machine_ai import LocalModel, model_name
 
 
 class LocalMachineAITests(unittest.TestCase):
+    def test_container_provider_uses_only_the_fixed_private_service(self):
+        with patch.dict('os.environ', LINKER_DOCKER_LOCAL_AI='container'):
+            self.assertEqual(LocalModel('qwen3:4b').endpoint, 'http://ollama:11434')
+        with patch.dict('os.environ', LINKER_DOCKER_LOCAL_AI='1'):
+            self.assertEqual(LocalModel('qwen3:4b').endpoint, 'http://host.docker.internal:11434')
+
     def test_saved_configuration_is_readable_without_database_or_model_calls(self):
         from pathlib import Path
         from server.management.service import ManagerService

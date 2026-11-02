@@ -259,7 +259,7 @@ class Setup:
     def install_shortcut(self):
         if not getattr(sys, 'frozen', False):
             return
-        script = "$s=New-Object -ComObject WScript.Shell; $p=Join-Path ([Environment]::GetFolderPath('Desktop')) 'Central Server - WSL Docker.lnk'; $l=$s.CreateShortcut($p); $l.TargetPath=$env:LINKER_SETUP_EXE; $l.Arguments='--launch'; $l.Description='Linker Central Server in WSL and Docker'; $l.IconLocation=$env:LINKER_SETUP_ICON+',0'; $l.Save()"
+        script = "$s=New-Object -ComObject WScript.Shell; $g=Join-Path ([Environment]::GetFolderPath('Programs')) 'Linker Central Server - WSL Docker'; New-Item -ItemType Directory -Path $g -Force | Out-Null; foreach($p in @((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Central Server - WSL Docker.lnk'),(Join-Path $g 'Central Server GUI.lnk'))) { $l=$s.CreateShortcut($p); $l.TargetPath=$env:LINKER_SETUP_EXE; $l.Arguments='--launch'; $l.Description='Linker Central Server in WSL and Docker'; $l.IconLocation=$env:LINKER_SETUP_ICON+',0'; $l.Save() }"
         self.run(['powershell.exe', '-NoProfile', '-Command', script], environment=dict(os.environ,
                  LINKER_SETUP_EXE=sys.executable, LINKER_SETUP_ICON=str(self.bundle / 'central-server.ico')))
 

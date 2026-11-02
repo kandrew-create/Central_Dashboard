@@ -88,6 +88,9 @@ class DockerManagerService:
                                        listen_address=values.get('LINKER_LISTEN_ADDRESS', '127.0.0.1'), https_port=https_port,
                                        http_port=http_port)
         self.config_keys = set(values)
+        self.ai_provider = values.get('LINKER_AI_PROVIDER', '1')
+        if self.ai_provider not in ('1', 'container'):
+            raise CollectorError('Choose host (1) or container for the saved local AI provider.')
         self.files = [workspace / 'deploy' / name for name in ('docker-compose.yml', 'docker-compose.wsl.yml')]
         if any(not file.is_file() for file in self.files):
             raise CollectorError('Select the WSL workspace containing its Compose file and saved deployment override.')
@@ -96,7 +99,9 @@ class DockerManagerService:
         private_write(self.settings.data_dir / 'agent-compose.yml',
                       b'services:\n  migrate:\n    logging: !override\n      driver: none\n')
         private_write(self.settings.data_dir / 'ai-compose.yml',
-                      b'services:\n  migrate:\n    networks: !override\n      - database\n      - gateway\nvolumes:\n  ai-settings:\n')
+                      ('services:\n  migrate:\n    networks: !override\n      - database\n      - gateway\n' +
+                       ('      - local-ai\n' if self.ai_provider == 'container' else '') +
+                       'volumes:\n  ai-settings:\n').encode())
         self.export_directory = private_directory(workspace / 'exports')
         self.ca_path = workspace / 'caddy-root.crt'
 
@@ -105,6 +110,8 @@ class DockerManagerService:
                    '--project-name', self.settings.project, '--env-file', str(self.settings.workspace / '.env')]
         for file in self.files:
             command.extend(('-f', str(file)))
+        if getattr(self, 'ai_provider', '1') == 'container':
+            command.extend(('--profile', 'local-ai'))
         return command + list(arguments)
 
     def _assert_current(self):
@@ -117,7 +124,7 @@ class DockerManagerService:
                        if key not in self.config_keys and not key.startswith('COMPOSE_')
                        and not key.startswith('LINKER_MANAGER_')
                        and key not in ('DOCKER_HOST', 'DOCKER_CONTEXT', 'LINKER_HTTP_PORT', 'LINKER_HTTPS_PORT',
-                                       'LINKER_MODE', 'LINKER_LISTEN_ADDRESS', 'SCADA_HOSTNAME')}
+                                       'LINKER_MODE', 'LINKER_LISTEN_ADDRESS', 'SCADA_HOSTNAME', 'LINKER_AI_PROVIDER')}
         try:
             result = subprocess.run(self._command(arguments), input=payload, capture_output=True,
                                     cwd=self.settings.workspace, env=environment, timeout=timeout)
@@ -161,7 +168,7 @@ class DockerManagerService:
                    '-e', 'LINKER_MANAGER_LISTEN_ADDRESS=' + self.settings.listen_address,
                    '--volume', bind_mount(self.settings.data_dir, '/manager-state')]
         if ai_action:
-            command += ['-e', 'LINKER_MANAGER_AI_DIR=/ai-settings', '-e', 'LINKER_DOCKER_LOCAL_AI=1',
+            command += ['-e', 'LINKER_MANAGER_AI_DIR=/ai-settings', '-e', 'LINKER_DOCKER_LOCAL_AI=' + getattr(self, 'ai_provider', '1'),
                         '--volume', self.settings.project + '_ai-settings:/ai-settings']
         if self.ca_path.is_file():
             command += ['--volume', bind_mount(self.ca_path, '/manager-ca.pem', True)]
@@ -302,6 +309,33 @@ class DockerManagerService:
 
     def catalog(self):
         return self._rpc('catalog')
+
+    def load_refresh_settings(self):
+        path = self.settings.data_dir / 'gui-refresh.json'
+        if not path.exists():
+            return dict(interval_seconds=30)
+        try:
+            value = json.loads(private_read(path, 2048))
+            if set(value) != {'interval_seconds'}:
+                raise ValueError()
+            self._validate_refresh_interval(value['interval_seconds'])
+            return value
+        except (OSError, ValueError, TypeError, KeyError):
+            raise CollectorError('Cannot read automatic refresh settings. Save a new interval in Deployment.') from None
+
+    @staticmethod
+    def _validate_refresh_interval(seconds):
+        if type(seconds) is not int or (seconds != 0 and not 5 <= seconds <= 3600):
+            raise CollectorError('Choose Off (0), or an automatic refresh interval from 5 to 3600 seconds.')
+
+    def save_refresh_settings(self, seconds):
+        self._validate_refresh_interval(seconds)
+        value = dict(interval_seconds=seconds)
+        try:
+            private_write(self.settings.data_dir / 'gui-refresh.json', json.dumps(value).encode())
+        except OSError:
+            raise CollectorError('Cannot save automatic refresh settings. Check the private settings folder.') from None
+        return value
 
     def sources(self):
         return self._rpc('sources')

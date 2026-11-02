@@ -18,6 +18,66 @@ except ImportError:
 
 @unittest.skipUnless(QApplication is not None, 'optional Qt Docker GUI dependency is not installed')
 class ModernDockerWindowTests(unittest.TestCase):
+    def test_refresh_interval_waits_from_completion_and_pauses_during_work(self):
+        self.app._set_refresh_preference(dict(interval_seconds=10))
+        self.assertTrue(self.app.refresh_timer.isSingleShot())
+        started, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        def status():
+            started.set()
+            release.wait(2)
+            return self.status
+        self.service.status.side_effect = status
+        self.app._automatic_refresh()
+        self.assertTrue(started.wait(1))
+        self.assertFalse(self.app.refresh_timer.isActive())
+        release.set()
+        self.wait_idle()
+        self.assertEqual(self.app.refresh_timer.interval(), 10000)
+        self.assertGreater(self.app.refresh_timer.remainingTime(), 9500)
+
+    def test_skipped_refresh_rearms_without_reading_or_changing_saved_interval(self):
+        self.app._set_refresh_preference(dict(interval_seconds=10))
+        self.app.names['source'].setText('Unfinished registration')
+        self.service.status.reset_mock()
+        self.app._automatic_refresh()
+        self.service.status.assert_not_called()
+        self.assertTrue(self.app.refresh_timer.isActive())
+        self.assertEqual(self.app.refresh_timer.interval(), 10000)
+
+    def test_automatic_refresh_updates_counts_and_preserves_success_feedback(self):
+        self.app.footer.setText('Server settings saved successfully.')
+        self.service.status.return_value = dict(self.status, revisions=8, batches=2)
+        self.app._automatic_refresh()
+        self.wait_idle()
+        self.assertEqual(self.app.status['revisions'], 8)
+        self.assertEqual(self.app.footer.text(), 'Server settings saved successfully.')
+        self.assertTrue(self.app.refresh_timer.isActive())
+
+    def test_automatic_refresh_skips_busy_and_unsaved_edits(self):
+        self.service.status.reset_mock()
+        self.app.busy = True
+        self.app._automatic_refresh()
+        self.app.busy = False
+        self.app.names['source'].setText('Unsaved source')
+        self.app._automatic_refresh()
+        self.service.status.assert_not_called()
+
+    def test_automatic_refresh_failure_is_quiet_and_off_setting_stops_timer(self):
+        self.app.footer.setText('Saved successfully.')
+        self.service.status.side_effect = CollectorError('Temporary Docker fault')
+        with patch('server.management.qt_docker_gui.QMessageBox.critical') as popup:
+            self.app._automatic_refresh()
+            self.wait_idle()
+        popup.assert_not_called()
+        self.assertIn('Automatic refresh failed', self.app.refresh_note.text())
+        self.assertEqual(self.app.footer.text(), 'Saved successfully.')
+        self.app.refresh_interval.setValue(0)
+        self.app.save_refresh_preference()
+        self.wait_idle()
+        self.assertFalse(self.app.refresh_timer.isActive())
+        self.service.save_refresh_settings.assert_called_once_with(0)
+
     def test_deployment_save_keeps_success_feedback_when_database_is_stopped(self):
         from dataclasses import replace
         self.app.deployment_fields['https_port'].setText('9444')
@@ -58,6 +118,8 @@ class ModernDockerWindowTests(unittest.TestCase):
         self.service.status.return_value = self.status
         self.service.catalog.return_value = {key: [] for key in ('customers', 'sites', 'projects', 'machines')}
         self.service.sources.return_value = []
+        self.service.load_refresh_settings.return_value = dict(interval_seconds=30)
+        self.service.save_refresh_settings.side_effect = lambda seconds: dict(interval_seconds=seconds)
         self.service.machine_interpretations.return_value = dict(configuration=dict(enabled=False, model='Not configured'),
                                                                rows=[], records_available=True)
         self.app = DockerManagerWindow(self.service)

@@ -14,6 +14,8 @@ DEPLOY_FILES = ('deploy/__init__.py', 'deploy/Dockerfile', 'deploy/requirements.
                 'deploy/wsl/launch-manager.sh', 'deploy/wsl/install-gui.sh',
                 'deploy/wsl/docker-compose.wsl.yml.template', 'deploy/wsl/Caddyfile.local',
                 'deploy/wsl/docker-compose.network.yml.template', 'deploy/wsl/Caddyfile.network',
+                'deploy/wsl/central-server.ico',
+                'deploy/wsl/central-server.png',
                 'deploy/docker-compose.yml')
 SOURCE_EXTENSIONS = {'.py', '.sql', '.mako', '.toml'}
 

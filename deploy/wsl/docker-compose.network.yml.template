@@ -10,9 +10,25 @@ services:
     build: {target: base}
     environment:
       LINKER_SERVER_DATA_DIR: /ai-settings
-      LINKER_DOCKER_LOCAL_AI: '1'
+      LINKER_DOCKER_LOCAL_AI: ${LINKER_AI_PROVIDER:-1}
     volumes: [ai-settings:/ai-settings]
-    networks: !override [database, gateway]
+    networks: !override [database, gateway, local-ai]
+  ollama:
+    image: ollama/ollama:0.40.13
+    profiles: [local-ai]
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_NO_CLOUD: '1'
+    volumes: [ollama-models:/root/.ollama]
+    networks: [local-ai]
+    logging: {driver: none}
+    healthcheck:
+      test: [CMD, ollama, list]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
   caddy:
     ports: !override
       - "${LINKER_LISTEN_ADDRESS:?Set approved host IPv4}:${LINKER_HTTPS_PORT:?Set HTTPS port}:443"
@@ -22,3 +38,6 @@ services:
       - caddy-config:/config
 volumes:
   ai-settings:
+  ollama-models:
+networks:
+  local-ai: {internal: true}

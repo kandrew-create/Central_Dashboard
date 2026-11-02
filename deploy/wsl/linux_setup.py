@@ -160,7 +160,7 @@ class Installer:
         self.environment_keys = {'POSTGRES_PASSWORD', 'MIGRATION_DATABASE_URL', 'INGEST_DATABASE_URL',
                                  'WORKER_DATABASE_URL', 'INGEST_DATABASE_PASSWORD', 'WORKER_DATABASE_PASSWORD',
                                  'LINKER_HTTP_PORT', 'LINKER_HTTPS_PORT', 'SCADA_HOSTNAME'}
-        self.environment_keys.update(('LINKER_MODE', 'LINKER_LISTEN_ADDRESS'))
+        self.environment_keys.update(('LINKER_MODE', 'LINKER_LISTEN_ADDRESS', 'LINKER_AI_PROVIDER'))
 
     def run(self, command, *, payload=None, timeout=900, message='A setup command failed.', env=None):
         environment = {key: value for key, value in os.environ.items() if key not in self.environment_keys
@@ -180,9 +180,11 @@ class Installer:
         return self.run(['docker', '--host', 'unix:///var/run/docker.sock', *arguments], **kwargs)
 
     def compose(self, *arguments, **kwargs):
+        provider = existing_environment(self.workspace / '.env').get('LINKER_AI_PROVIDER', '1') if (self.workspace / '.env').is_file() else '1'
+        profile = ('--profile', 'local-ai') if provider == 'container' else ()
         return self.docker('compose', '--project-name', self.args.project, '--env-file', str(self.workspace / '.env'),
                            '-f', str(self.workspace / 'deploy/docker-compose.yml'),
-                           '-f', str(self.workspace / 'deploy/docker-compose.wsl.yml'), *arguments, **kwargs)
+                           '-f', str(self.workspace / 'deploy/docker-compose.wsl.yml'), *profile, *arguments, **kwargs)
 
     def containers(self):
         output = self.docker('ps', '-a', '--filter', 'label=com.docker.compose.project=' + self.args.project,

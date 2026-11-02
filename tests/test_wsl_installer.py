@@ -26,6 +26,8 @@ class PackageTests(unittest.TestCase):
             self.assertEqual((first / 'application.tar.gz').read_bytes(), (second / 'application.tar.gz').read_bytes())
             names = set(a['files'])
             self.assertIn('server/management/qt_docker_gui.py', names)
+            self.assertIn('deploy/wsl/central-server.ico', names)
+            self.assertIn('deploy/wsl/central-server.png', names)
             self.assertIn('server/migrations/sql/0009_source_schema_names.sql', names)
             for name in names:
                 self.assertFalse({'tests', 'secrets', '.env', '.tools', '.venv-gui'}.intersection(Path(name).parts))
@@ -90,6 +92,17 @@ class PackageTests(unittest.TestCase):
 
 @unittest.skipUnless(os.name == 'posix', 'Linux filesystem and setup guards')
 class LinuxSetupTests(unittest.TestCase):
+    def test_saved_container_model_provider_keeps_profile_on_setup_rerun(self):
+        workspace = self.home / 'server'
+        workspace.mkdir(mode=0o700)
+        self.module.atomic_write(workspace / '.env', self.module.new_environment(9080, 9444) + b'LINKER_AI_PROVIDER=container\n')
+        installer = self.installer()
+        installer.docker = Mock(return_value=b'')
+        installer.compose('ps')
+        command = installer.docker.call_args.args
+        self.assertIn('--profile', command)
+        self.assertIn('local-ai', command)
+
     def setUp(self):
         from deploy.wsl import linux_setup
         self.module = linux_setup

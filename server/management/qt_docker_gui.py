@@ -1,15 +1,16 @@
 """Modern local desktop for the WSL/Docker server; backend operations remain in docker.py."""
 import argparse
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QSize, QThreadPool, QTimer, Qt, Signal, Slot
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QApplication, QAbstractItemView, QButtonGroup, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
-    QStackedWidget, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
+    QSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from collector.errors import CollectorError
@@ -50,6 +51,11 @@ def tone(widget, value):
     widget.setProperty('tone', value)
     widget.style().unpolish(widget)
     widget.style().polish(widget)
+
+
+def application_icon():
+    path = Path(__file__).resolve().parents[2] / 'deploy/wsl/central-server.ico'
+    return QIcon(str(path)) if path.is_file() else icon('sources', '#356ff0', 128)
 
 
 class WorkSignals(QObject):
@@ -127,6 +133,13 @@ class DockerManagerWindow(QMainWindow):
         self._ai_pending = False
         self._work = None
         self._done = None
+        self._quiet_feedback = None
+        self._refresh_preferences_loaded = False
+        self._saved_refresh_interval = 0
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.setSingleShot(True)
+        self.refresh_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self.refresh_timer.timeout.connect(self._automatic_refresh)
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(1)
         self.controls = []
@@ -135,7 +148,7 @@ class DockerManagerWindow(QMainWindow):
         self.ai_rows = []
         self.status = {}
         self.setWindowTitle('Central Server - WSL / Docker')
-        self.setWindowIcon(icon('sources', '#356ff0', 32))
+        self.setWindowIcon(application_icon())
         self.resize(1320, 860)
         self.setMinimumSize(1100, 740)
         self.setStyleSheet(STYLESHEET)
@@ -459,6 +472,25 @@ class DockerManagerWindow(QMainWindow):
 
     def _deployment_page(self):
         page, layout = self._page()
+        refresh_frame, refresh_box = card()
+        refresh_box.addWidget(label('Automatic display refresh', 'sectionTitle'))
+        refresh_row = QHBoxLayout()
+        refresh_row.addWidget(label('Refresh every', 'fieldLabel'))
+        self.refresh_interval = QSpinBox()
+        self.refresh_interval.setRange(0, 3600)
+        self.refresh_interval.setSingleStep(5)
+        self.refresh_interval.setSpecialValueText('Off')
+        self.refresh_interval.setSuffix(' seconds')
+        self.controls.append(self.refresh_interval)
+        refresh_row.addWidget(self.refresh_interval)
+        refresh_row.addWidget(self.button('Save refresh setting', self.save_refresh_preference))
+        refresh_row.addStretch()
+        refresh_box.addLayout(refresh_row)
+        self.refresh_note = label('Loading saved refresh interval…', 'help', True)
+        refresh_box.addWidget(self.refresh_note)
+        refresh_box.addWidget(label('Choose Off, or 5–3600 seconds (default: 30). The interval starts after each refresh finishes. Updates health, received-data counts, sources and saved identification results while this window is open. '
+                                    'Refresh waits during other work or unsaved edits. Collector upload schedules are configured separately.', 'help', True))
+        layout.addWidget(refresh_frame)
         frame, box = card()
         row = QHBoxLayout()
         row.addWidget(label('A separate Linux workspace', 'sectionTitle'))
@@ -691,11 +723,14 @@ class DockerManagerWindow(QMainWindow):
             control.setEnabled(not self.busy and selected)
         self._update_deployment_preview()
 
-    def _start(self, message, operation, done):
+    def _start(self, message, operation, done, quiet=False):
         if self.busy or self.closing:
             return False
         self.busy = True
-        self.footer.setText(message)
+        self.refresh_timer.stop()
+        self._quiet_feedback = self.footer.text() if quiet else None
+        if not quiet:
+            self.footer.setText(message)
         self.progress.setRange(0, 0)
         self._sync_controls()
         self._done = done
@@ -707,6 +742,8 @@ class DockerManagerWindow(QMainWindow):
     @Slot(bool, object)
     def _finished(self, success, result):
         done = self._done
+        quiet_feedback = self._quiet_feedback
+        self._quiet_feedback = None
         self._done = None
         self._work = None
         self.busy = False
@@ -716,16 +753,23 @@ class DockerManagerWindow(QMainWindow):
         if success:
             done(result)
         else:
-            self.footer.setText(result)
-            if not self.closing:
+            if quiet_feedback is not None:
+                self.refresh_note.setText('Automatic refresh failed: ' + result + ' The next interval will retry.')
+            else:
+                self.footer.setText(result)
+            if not self.closing and quiet_feedback is None:
                 QMessageBox.critical(self, 'Central Server', result)
+        if quiet_feedback is not None:
+            self.footer.setText(quiet_feedback)
         if self.closing:
             QTimer.singleShot(0, self.close)
         elif self._ai_pending and not self.busy:
             self._ai_pending = False
             self.refresh_identification(preserve_feedback=True)
+        if not self.busy:
+            self._arm_refresh_timer()
 
-    def refresh(self, success_message=None):
+    def refresh(self, success_message=None, quiet=False):
         def operation():
             status = self.service.status()
             result = dict(status=status, catalog=self.service.catalog() if status['database_ready'] else {key: [] for key in self.registry},
@@ -734,11 +778,56 @@ class DockerManagerWindow(QMainWindow):
                 result['ai'] = self.service.machine_interpretations(include_records=status['database_ready'])
             except CollectorError as error:
                 result['ai_error'] = str(error)
+            if not self._refresh_preferences_loaded:
+                try:
+                    result['refresh_preferences'] = self.service.load_refresh_settings()
+                except CollectorError as error:
+                    result['refresh_preferences_error'] = str(error)
             return result
         self._start(success_message or 'Refreshing server health and sources…', operation,
-                    lambda result: self._show_snapshot(result, success_message))
+                    lambda result: self._show_snapshot(result, success_message), quiet=quiet)
+
+    def _set_refresh_preference(self, settings):
+        seconds = settings['interval_seconds']
+        self._saved_refresh_interval = seconds
+        self._refresh_preferences_loaded = True
+        self.refresh_interval.setValue(seconds)
+        self.refresh_timer.stop()
+        self._arm_refresh_timer()
+        self.refresh_note.setText('Automatic refresh is off.' if not seconds else f'Automatic refresh every {seconds} seconds.')
+
+    def save_refresh_preference(self):
+        if self.busy:
+            return
+        seconds = self.refresh_interval.value()
+        def saved(result):
+            self._set_refresh_preference(result)
+            self.footer.setText('Automatic refresh setting saved successfully.')
+        self._start('Saving automatic refresh setting…', lambda: self.service.save_refresh_settings(seconds), saved)
+
+    def _automatic_refresh(self):
+        self.refresh_timer.stop()
+        if (not self._saved_refresh_interval or self.busy or self.closing or not self.isVisible() or self.form_dirty or self._deployment_dirty()
+                or self.refresh_interval.value() != self._saved_refresh_interval
+                or (self._ai_saved_model is not None and self.ai_model.text() != self._ai_saved_model)):
+            self._arm_refresh_timer()
+            return
+        self.refresh(quiet=True)
+
+    def _arm_refresh_timer(self):
+        if self._saved_refresh_interval and not self.busy and not self.closing:
+            self.refresh_timer.start(self._saved_refresh_interval * 1000)
 
     def _show_snapshot(self, result, success_message=None):
+        if 'refresh_preferences' in result:
+            self._set_refresh_preference(result['refresh_preferences'])
+        elif 'refresh_preferences_error' in result:
+            self._refresh_preferences_loaded = True
+            self.refresh_note.setText(result['refresh_preferences_error'])
+        else:
+            self.refresh_note.setText(('Automatic refresh is off. ' if not self._saved_refresh_interval else
+                                      f'Automatic refresh every {self._saved_refresh_interval} seconds. ') +
+                                     'Last refresh: ' + datetime.now().strftime('%H:%M:%S'))
         self.status = result['status']
         ready = all(self.status[key] for key in ('api_ready', 'database_ready', 'worker_running'))
         active = any(self.status[key] for key in ('api_ready', 'database_ready', 'worker_running'))
@@ -919,8 +1008,9 @@ class DockerManagerWindow(QMainWindow):
         if self._ai_saved_model is None or self.ai_model.text() == self._ai_saved_model:
             self.ai_model.setText(saved)
         self._ai_saved_model = saved
+        runtime = 'Private Docker Ollama service.' if getattr(self.service, 'ai_provider', '1') == 'container' else 'Ollama on this Central Server PC.'
         self.ai_config_state.setText(('Enabled' if configuration['enabled'] else 'Disabled') + ' · Saved model: ' + saved +
-                                     '. Ollama must be installed and running on this Central Server PC.')
+                                     '. ' + runtime)
 
     def enable_machine_ai(self):
         if self.busy:
@@ -956,11 +1046,13 @@ class DockerManagerWindow(QMainWindow):
             self.footer.setText('Finishing the current operation before closing…')
             event.ignore()
         elif (self.form_dirty or self._deployment_dirty() or
+              self.refresh_interval.value() != self._saved_refresh_interval or
               (self._ai_saved_model is not None and self.ai_model.text() != self._ai_saved_model)) and not self.confirm(
                   'Close manager?', 'Discard unsaved registration, deployment or model edits and close this window? The server stays running.'):
             self.closing = False
             event.ignore()
         else:
+            self.refresh_timer.stop()
             event.accept()
 
 
@@ -971,6 +1063,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     app = QApplication.instance() or QApplication([])
     app.setApplicationName('Linker Central Server')
+    app.setDesktopFileName('linker-central-server')
+    app.setWindowIcon(application_icon())
     app.setStyle('Fusion')
     app.setFont(QFont('Ubuntu Sans', 10))
     try:
@@ -979,6 +1073,11 @@ def main(argv=None):
         QMessageBox.critical(None, 'Central Server - WSL / Docker', 'Cannot open this workspace. Check its private .env, saved connection mode/address and WSL Compose files.')
         return 1
     window = DockerManagerWindow(service)
+    from server.management.desktop_identity import install_desktop_entry
+    try:
+        install_desktop_entry(service.settings.workspace, service.settings.project)
+    except (OSError, ValueError, CollectorError):
+        pass  # Optional shell artwork must not prevent server management.
     window.show()
     return app.exec()
 

@@ -46,7 +46,13 @@ def configuration(data_dir):
 
 def save_configuration(data_dir, model, enabled):
     value = dict(enabled=bool(enabled), model=model_name(model))
-    write_private_file(Path(data_dir) / 'machine-ai.json', json.dumps(value).encode())
+    if os.name == 'posix':
+        # Central's Linux settings must not depend on a Collector snapshot's
+        # Windows credential dispatcher. This file contains only enabled/model.
+        from server.management.linux_vault import private_write
+        private_write(Path(data_dir) / 'machine-ai.json', json.dumps(value).encode())
+    else:
+        write_private_file(Path(data_dir) / 'machine-ai.json', json.dumps(value).encode())
     return value
 
 
@@ -54,10 +60,11 @@ class LocalModel:
     def __init__(self, model, client=None):
         self.model = model_name(model)
         self.client = client
-        self.endpoint = 'http://host.docker.internal:11434' if os.environ.get('LINKER_DOCKER_LOCAL_AI') == '1' else ENDPOINT
+        provider = os.environ.get('LINKER_DOCKER_LOCAL_AI', '')
+        self.endpoint = {'1': 'http://host.docker.internal:11434', 'container': 'http://ollama:11434'}.get(provider, ENDPOINT)
 
     def request(self, path, body=None):
-        # Numeric loopback only, no environment proxies, redirects or cloud fallback.
+        # Fixed same-PC model services only; no proxies, redirects or cloud fallback.
         def send(client):
             with client.stream('GET' if body is None else 'POST', self.endpoint + path, json=body) as response:
                 response.raise_for_status()

@@ -11,6 +11,28 @@ from server.management.docker import DockerManagerService
 
 @unittest.skipUnless(os.name == 'posix', 'Linux private deployment settings')
 class DeploymentSettingsTests(unittest.TestCase):
+    def test_linux_ai_save_does_not_use_windows_or_collector_private_writer(self):
+        from server.machine_ai import configuration, save_configuration
+        directory = self.root / 'native-ai'
+        directory.mkdir(mode=0o700)
+        with patch('server.machine_ai.write_private_file', side_effect=CollectorError('Protected setup requires Windows')) as writer:
+            saved = save_configuration(directory, 'fixture-local', False)
+        writer.assert_not_called()
+        self.assertEqual(configuration(directory), saved)
+        self.assertEqual((directory / 'machine-ai.json').stat().st_mode & 0o777, 0o600)
+
+    def test_refresh_preference_persists_without_docker_or_database_work(self):
+        self.assertEqual(self.service.load_refresh_settings(), dict(interval_seconds=30))
+        self.service.save_refresh_settings(15)
+        reopened = DockerManagerService(self.root)
+        self.assertEqual(reopened.load_refresh_settings(), dict(interval_seconds=15))
+        reopened.save_refresh_settings(0)
+        self.assertEqual(reopened.load_refresh_settings(), dict(interval_seconds=0))
+        for value in (-1, 1, 4, 3601, True):
+            with self.assertRaises(CollectorError):
+                reopened.save_refresh_settings(value)
+        self.service._run.assert_not_called()
+
     def test_ai_settings_survive_reopen_without_database_or_model_reads(self):
         from server.management.docker_agent import DockerAgent
         agent = DockerAgent(self.root / 'private-ai', connection_factory=Mock(side_effect=AssertionError('database access')))

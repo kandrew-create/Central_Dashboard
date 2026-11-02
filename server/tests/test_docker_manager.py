@@ -12,6 +12,14 @@ from server.management.docker_agent import main
 
 
 class DockerCommandTests(unittest.TestCase):
+    def test_container_ai_provider_selects_only_local_profile_and_internal_service(self):
+        self.service.settings = DockerSettings(PurePosixPath('/tmp/linux-workspace'))
+        self.service.ai_provider = 'container'
+        self.assertIn('local-ai', self.service._command(['ps']))
+        self.service._run = Mock(return_value=b'{"ok":true,"result":{}}')
+        self.service._rpc('machine_interpretations', dict(include_records=False))
+        self.assertIn('LINKER_DOCKER_LOCAL_AI=container', self.service._run.call_args.args[0])
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
