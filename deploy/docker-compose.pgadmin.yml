@@ -1,0 +1,52 @@
+name: linker-central-pgadmin
+services:
+  login:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      PGADMIN_USERNAME: ${PGADMIN_USERNAME:?Set the pgAdmin username}
+      PGADMIN_LOGIN_HASH: ${PGADMIN_LOGIN_HASH:?Set the private bcrypt password hash}
+      PGADMIN_PROXY_SECRET: ${PGADMIN_PROXY_SECRET:?Set the private proxy secret}
+    ports:
+      - '127.0.0.1:${PGADMIN_PORT:-5050}:8080'
+    volumes:
+      - ./pgadmin/Caddyfile:/etc/caddy/Caddyfile:ro
+    read_only: true
+    tmpfs: [/config, /data, /tmp]
+    networks:
+      default: {}
+      login:
+        ipv4_address: ${PGADMIN_PROXY_ADDRESS:?Set the trusted proxy address}
+    logging: {driver: none}
+  pgadmin:
+    image: dpage/pgadmin4:9.19
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:?Set the local pgAdmin login}
+      PGADMIN_DEFAULT_PASSWORD_FILE: /run/pgadmin-secrets/login-password
+      PGADMIN_SERVER_JSON_FILE: /run/pgadmin-secrets/servers.json
+      PGADMIN_DISABLE_POSTFIX: '1'
+      PGADMIN_CONFIG_AUTHENTICATION_SOURCES: "['webserver']"
+      PGADMIN_CONFIG_WEBSERVER_AUTO_CREATE_USER: 'False'
+      PGADMIN_CONFIG_WEBSERVER_REMOTE_USER: "'HTTP_X_FORWARDED_USER'"
+      PGADMIN_CONFIG_WEBSERVER_REMOTE_USER_FROM_HEADER: 'True'
+      PGADMIN_CONFIG_WEBSERVER_TRUSTED_PROXIES: "['${PGADMIN_PROXY_ADDRESS:?Set the trusted proxy IPv4 address}', '::ffff:${PGADMIN_PROXY_ADDRESS:?Set the trusted proxy IPv4 address}/128']"
+      PGADMIN_CONFIG_WEBSERVER_SHARED_SECRET: "'${PGADMIN_PROXY_SECRET:?Set the private proxy secret}'"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+      - pgadmin-secrets:/run/pgadmin-secrets:ro
+    networks: [login, central-database]
+    logging: {driver: none}
+volumes:
+  pgadmin-data:
+  pgadmin-secrets:
+networks:
+  login:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${PGADMIN_LOGIN_SUBNET:?Set an unused private login subnet}
+  central-database:
+    external: true
+    name: ${CENTRAL_DATABASE_NETWORK:?Set the existing Central Server database network}

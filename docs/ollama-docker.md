@@ -1,6 +1,6 @@
 # Local AI inside Docker
 
-The development Central Server now runs Ollama 0.40.13 as the `ollama` service in `linker-scada-wsl`. The copied model is `qwen3:4b`. The worker and management agent use the fixed internal address `http://ollama:11434`; the Windows Ollama application is retained as a fallback and is no longer the active inference service.
+The development Central Server now runs Ollama 0.40.13 as the `ollama` service in `linker-scada-wsl`. The copied model is `qwen3:4b`. The worker and management agent use the fixed internal address `http://ollama:11434`; the Windows Ollama application was subsequently uninstalled at the operator's request. Its local model/recovery files remain preserved; Docker inference is independent of that application.
 
 The WSL override enables this with private `.env` setting `LINKER_AI_PROVIDER=container` and Compose profile `local-ai`. A missing setting or value `1` retains the Windows-host provider for older installations. Manager start/stop and installer reruns honor the selected profile. Local/Network deployment saves retain this unrelated setting. Restart an already-open manager after an external provider change.
 
@@ -17,3 +17,7 @@ Protected pre-switch settings and fingerprints are retained under the WSL worksp
 The actual Docker worker passed the model-list/digest check and a production-timeout synthetic inference: `Oven 1 temperature high` identified `Oven 1`. The management agent also verified the model through the container service. A different synthetic equipment message remained uncertain; model output still requires original-message evidence and never approves a mapping. No synthetic upload or native record was inserted. Container inspection verified a healthy model service, no published port and only an internal network.
 
 Future model transfers require explicit provisioning of verified model files; this isolated service does not automatically download models or use a cloud fallback. Reading Equipment Identification never enables AI or calls a model. Existing Collector uploads continue through the saved HTTPS endpoint.
+
+## Windows application removal
+
+On 2026-11-02, the Windows Ollama 0.40.13 uninstaller completed with exit code 0. Its executable, uninstall registration and Windows processes were removed. All 14 existing files under the Windows `.ollama` model/recovery folder matched pre-uninstall SHA-256 fingerprints. A subsequent synthetic inference through the Docker worker succeeded, and the API, database, worker and Docker Ollama remained healthy. No Docker volumes, source identities or credentials were removed.
