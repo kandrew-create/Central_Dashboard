@@ -1,5 +1,6 @@
 """Modern local desktop for the WSL/Docker server; backend operations remain in docker.py."""
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QSize, QThreadPool, QTimer, Qt, Signal, Slot
@@ -122,6 +123,7 @@ class DockerManagerWindow(QMainWindow):
         self.busy = False
         self.closing = False
         self.form_dirty = False
+        self._ai_saved_model = None
         self._ai_pending = False
         self._work = None
         self._done = None
@@ -198,7 +200,8 @@ class DockerManagerWindow(QMainWindow):
         rule.setObjectName('sidebarRule')
         side.addWidget(rule)
         side.addSpacing(13)
-        side.addWidget(label('NETWORK SERVER' if self.service.settings.mode == 'network' else 'LOCAL ENVIRONMENT', 'sidebarCaption'))
+        self.sidebar_environment = label('NETWORK SERVER' if self.service.settings.mode == 'network' else 'LOCAL ENVIRONMENT', 'sidebarCaption')
+        side.addWidget(self.sidebar_environment)
         side.addWidget(label('WSL 2  /  Docker', 'sidebarNote'))
         self.sidebar_status = label('Checking server…', 'sidebarNote')
         side.addWidget(self.sidebar_status)
@@ -222,6 +225,7 @@ class DockerManagerWindow(QMainWindow):
         titles.addWidget(self.page_subtitle)
         top.addLayout(titles, 1)
         environment = label(('NETWORK' if self.service.settings.mode == 'network' else 'LOCAL') + '  ·  WSL / DOCKER', 'pill')
+        self.environment_badge = environment
         top.addWidget(environment, 0, Qt.AlignmentFlag.AlignTop)
         content.addWidget(heading)
         self.pages = QStackedWidget()
@@ -329,7 +333,8 @@ class DockerManagerWindow(QMainWindow):
         endpoint_box.setObjectName('endpointBox')
         endpoint_row = QHBoxLayout(endpoint_box)
         endpoint_row.setContentsMargins(15, 4, 6, 4)
-        endpoint_row.addWidget(label(self.service.settings.upload_url, 'endpoint'), 1)
+        self.overview_endpoint = label(self.service.settings.upload_url, 'endpoint')
+        endpoint_row.addWidget(self.overview_endpoint, 1)
         endpoint_row.addWidget(self.button('Copy URL', self.copy_url, 'quiet'))
         box.addWidget(endpoint_box)
         layout.addWidget(connection)
@@ -458,9 +463,40 @@ class DockerManagerWindow(QMainWindow):
         row = QHBoxLayout()
         row.addWidget(label('A separate Linux workspace', 'sectionTitle'))
         row.addStretch()
-        row.addWidget(label('NETWORK DEPLOYMENT' if self.service.settings.mode == 'network' else 'LOCAL DEPLOYMENT', 'pill'))
+        self.deployment_badge = label('NETWORK DEPLOYMENT' if self.service.settings.mode == 'network' else 'LOCAL DEPLOYMENT', 'pill')
+        row.addWidget(self.deployment_badge)
         box.addLayout(row)
-        box.addWidget(label('This window manages the Docker server in WSL. Your Windows installation remains separate.', 'muted', True))
+        box.addWidget(label('Configure this Central Server here. Database files, credentials and certificates stay in their existing Docker volumes.', 'muted', True))
+        form = QGridLayout()
+        self.deployment_mode = QComboBox()
+        self.deployment_mode.addItem('Local testing (one PC)', 'local')
+        self.deployment_mode.addItem('Network server (multiple collector PCs)', 'network')
+        self.deployment_fields = {name: QLineEdit() for name in ('server_host', 'listen_address', 'https_port', 'http_port')}
+        fields = [('Connection mode', self.deployment_mode)] + [(title, self.deployment_fields[name]) for name, title in (
+            ('server_host', 'Central PC hostname / IPv4'), ('listen_address', 'HTTPS listen IPv4 address'),
+            ('https_port', 'HTTPS port'), ('http_port', 'Local HTTP redirect port'))]
+        for index, (title, widget) in enumerate(fields):
+            form.addWidget(label(title, 'fieldLabel'), index, 0)
+            form.addWidget(widget, index, 1)
+            self.controls.append(widget)
+        box.addLayout(form)
+        self.deployment_preview = label('', 'endpoint', True)
+        box.addWidget(self.deployment_preview)
+        actions = QHBoxLayout()
+        self.validate_deployment_button = self.button('Validate settings', self.validate_deployment)
+        self.save_deployment_button = self.button('Save settings', self.save_deployment, 'primary')
+        self.apply_deployment_button = self.button('Apply and restart', lambda: self.save_deployment(restart=True))
+        for button in (self.validate_deployment_button, self.save_deployment_button, self.apply_deployment_button):
+            actions.addWidget(button)
+        actions.addStretch()
+        box.addLayout(actions)
+        box.addWidget(label('Save requires this server to be stopped. Apply and restart stops only this project before saving. '
+                            'After changing the endpoint, export fresh setup files for your Collectors.', 'help', True))
+        self._populate_deployment()
+        self.deployment_mode.currentIndexChanged.connect(self._deployment_mode_changed)
+        for entry in self.deployment_fields.values():
+            entry.textChanged.connect(self._deployment_changed)
+        self.saved_deployment_labels = {}
         for title, value in (('Connection mode', 'Network server (multiple collector PCs)' if self.service.settings.mode == 'network' else 'Local testing (one PC)'),
                              ('HTTPS listen address', self.service.settings.listen_address),
                              ('Compose project', self.service.settings.project),
@@ -470,6 +506,7 @@ class DockerManagerWindow(QMainWindow):
             box.addSpacing(7)
             box.addWidget(label(title.upper(), 'eyebrow'))
             value_label = label(value, 'endpoint', True)
+            self.saved_deployment_labels[title] = value_label
             value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             box.addWidget(value_label)
         layout.addWidget(frame)
@@ -491,7 +528,20 @@ class DockerManagerWindow(QMainWindow):
         row.addStretch()
         row.addWidget(self.button('Refresh results', self.refresh_identification, 'quiet', 'refresh'))
         box.addLayout(row)
-        box.addWidget(label('Events use the registered machine tag. Alarm AI is not configured in this Docker deployment.', 'muted', True))
+        box.addWidget(label('Events use the registered machine tag. Enable optional local AI below for alarm equipment suggestions.', 'muted', True))
+        ai_controls = QHBoxLayout()
+        self.ai_model = QLineEdit('qwen3:4b')
+        self.ai_model.setPlaceholderText('Installed local Ollama model')
+        self.controls.append(self.ai_model)
+        ai_controls.addWidget(label('Local model', 'fieldLabel'))
+        ai_controls.addWidget(self.ai_model, 1)
+        self.enable_ai_button = self.button('Enable local AI', self.enable_machine_ai, 'primary')
+        self.disable_ai_button = self.button('Disable', self.disable_machine_ai)
+        ai_controls.addWidget(self.enable_ai_button)
+        ai_controls.addWidget(self.disable_ai_button)
+        box.addLayout(ai_controls)
+        self.ai_config_state = label('Reading saved local AI settings…', 'help', True)
+        box.addWidget(self.ai_config_state)
         self.ai_note = label('No saved results yet. Results appear here after records are received and processed.', 'help', True)
         box.addWidget(self.ai_note)
         self.ai_table = self._table(('SOURCE', 'TABLE', 'RECORD ID', 'STATUS', 'EQUIPMENT', 'METHOD / MODEL'))
@@ -522,6 +572,85 @@ class DockerManagerWindow(QMainWindow):
 
     def _form_edited(self, *args):
         self.form_dirty = True
+
+    def _populate_deployment(self):
+        self.deployment_mode.blockSignals(True)
+        self.deployment_mode.setCurrentIndex(1 if self.service.settings.mode == 'network' else 0)
+        self.deployment_mode.blockSignals(False)
+        for name, entry in self.deployment_fields.items():
+            entry.blockSignals(True)
+            entry.setText(str(getattr(self.service.settings, name)))
+            entry.blockSignals(False)
+        self._update_deployment_preview()
+        network = self.service.settings.mode == 'network'
+        if hasattr(self, 'saved_deployment_labels'):
+            self.saved_deployment_labels['Connection mode'].setText('Network server (multiple collector PCs)' if network else 'Local testing (one PC)')
+            self.saved_deployment_labels['HTTPS listen address'].setText(self.service.settings.listen_address)
+            self.saved_deployment_labels['Collector endpoint'].setText(self.service.settings.upload_url)
+        self.deployment_badge.setText('NETWORK DEPLOYMENT' if network else 'LOCAL DEPLOYMENT')
+        self.sidebar_environment.setText('NETWORK SERVER' if network else 'LOCAL ENVIRONMENT')
+        self.environment_badge.setText(('NETWORK' if network else 'LOCAL') + '  ·  WSL / DOCKER')
+        self.overview_endpoint.setText(self.service.settings.upload_url)
+
+    def _update_deployment_preview(self):
+        self.deployment_preview.setText('Collector upload URL: https://' + self.deployment_fields['server_host'].text() +
+                                        ':' + self.deployment_fields['https_port'].text() + '/v1/uploads')
+        self.deployment_fields['http_port'].setEnabled(not self.busy and self.deployment_mode.currentData() == 'local')
+
+    def _deployment_mode_changed(self, *args):
+        local = self.deployment_mode.currentData() == 'local'
+        self.deployment_fields['listen_address'].setText('127.0.0.1' if local else '0.0.0.0')
+        if local:
+            self.deployment_fields['server_host'].setText('localhost')
+        elif self.deployment_fields['server_host'].text() == 'localhost':
+            self.deployment_fields['server_host'].clear()
+        self._deployment_changed()
+
+    def _deployment_changed(self, *args):
+        self._update_deployment_preview()
+        self.footer.setText('Unsaved deployment settings. Validate, then Save or Apply and restart.')
+
+    def _deployment_dirty(self):
+        return (self.deployment_mode.currentData() != self.service.settings.mode or
+                any(entry.text() != str(getattr(self.service.settings, name)) for name, entry in self.deployment_fields.items()))
+
+    def _deployment_candidate(self):
+        try:
+            return replace(self.service.settings, mode=self.deployment_mode.currentData(),
+                           server_host=self.deployment_fields['server_host'].text().strip().lower(),
+                           listen_address=self.deployment_fields['listen_address'].text().strip(),
+                           https_port=int(self.deployment_fields['https_port'].text()),
+                           http_port=int(self.deployment_fields['http_port'].text()))
+        except ValueError:
+            raise CollectorError('Enter different valid whole-number HTTP and HTTPS ports.') from None
+
+    def validate_deployment(self):
+        if self.busy:
+            return
+        try:
+            candidate = self._deployment_candidate()
+        except CollectorError as error:
+            QMessageBox.warning(self, 'Deployment settings', str(error))
+            return
+        self._start('Validating the server address and ports…', lambda: self.service.validate_settings(candidate),
+                    lambda result: self.footer.setText('Deployment settings are valid. Nothing has been changed.'))
+
+    def save_deployment(self, restart=False):
+        if self.busy:
+            return
+        try:
+            candidate = self._deployment_candidate()
+        except CollectorError as error:
+            QMessageBox.warning(self, 'Deployment settings', str(error))
+            return
+        if restart and not self.confirm('Apply server settings?', 'Stop this Docker project, save the connection settings and restart it? '
+                                       'Collectors retain pending uploads during the interruption. Existing data and credentials are preserved.'):
+            return
+        def saved(result):
+            self._populate_deployment()
+            self.refresh('Server settings saved successfully.' + (' Docker server restarted.' if restart else ' Start the server when ready.'))
+        action = self.service.apply_settings if restart else self.service.save_settings
+        self._start('Applying deployment settings…' if restart else 'Saving deployment settings…', lambda: action(candidate), saved)
 
     def _choice_changed(self, field):
         self.form_dirty = True
@@ -560,6 +689,7 @@ class DockerManagerWindow(QMainWindow):
         selected = self.selected_source() is not None and self.status.get('database_ready', False)
         for control in (self.export_button, self.rotate_button, self.delete_button):
             control.setEnabled(not self.busy and selected)
+        self._update_deployment_preview()
 
     def _start(self, message, operation, done):
         if self.busy or self.closing:
@@ -662,6 +792,9 @@ class DockerManagerWindow(QMainWindow):
         self.footer.setText(success_message or self.status.get('error') or 'Server status is up to date.')
 
     def start_server(self):
+        if self._deployment_dirty():
+            self.footer.setText('Save the deployment settings before starting, or use Apply and restart.')
+            return
         self._start('Starting the Docker server…', self.service.start,
                     lambda result: self.refresh('Docker server started successfully.'))
 
@@ -764,6 +897,8 @@ class DockerManagerWindow(QMainWindow):
         self._start('Reading saved identification results…', operation, shown)
 
     def _show_identification(self, result):
+        if 'configuration' in result:
+            self._show_ai_configuration(result['configuration'])
         self.ai_rows = result['rows']
         self.ai_table.setRowCount(len(self.ai_rows))
         self.ai_evidence.clear()
@@ -777,7 +912,34 @@ class DockerManagerWindow(QMainWindow):
         self.ai_evidence.clear()
         self.ai_note.setText(('Saved results from this server. Select a row to inspect the original message.' if self.ai_rows else
                               'No saved results yet. Results appear after records are received and processed.')
-                             if result.get('records_available', True) else 'Start the server to load its saved results. Alarm AI remains disabled.')
+                             if result.get('records_available', True) else 'Start the server to load its saved results. The saved AI choice is retained.')
+
+    def _show_ai_configuration(self, configuration):
+        saved = configuration['model']
+        if self._ai_saved_model is None or self.ai_model.text() == self._ai_saved_model:
+            self.ai_model.setText(saved)
+        self._ai_saved_model = saved
+        self.ai_config_state.setText(('Enabled' if configuration['enabled'] else 'Disabled') + ' · Saved model: ' + saved +
+                                     '. Ollama must be installed and running on this Central Server PC.')
+
+    def enable_machine_ai(self):
+        if self.busy:
+            return
+        model = self.ai_model.text().strip()
+        def enabled(result):
+            self._show_ai_configuration(result)
+            self.footer.setText('Local AI enabled. Alarm equipment suggestions use the saved local model.')
+            self.refresh_identification(preserve_feedback=True)
+        self._start('Checking the installed local model and enabling AI…', lambda: self.service.enable_machine_ai(model), enabled)
+
+    def disable_machine_ai(self):
+        if self.busy:
+            return
+        def disabled(result):
+            self._show_ai_configuration(result)
+            self.footer.setText('Local AI disabled. Saved results are retained.')
+            self.refresh_identification(preserve_feedback=True)
+        self._start('Disabling local AI…', self.service.disable_machine_ai, disabled)
 
     def _show_evidence(self):
         index = self.ai_table.currentRow()
@@ -793,7 +955,9 @@ class DockerManagerWindow(QMainWindow):
             self.closing = True
             self.footer.setText('Finishing the current operation before closing…')
             event.ignore()
-        elif self.form_dirty and not self.confirm('Close manager?', 'Discard the unfinished source registration and close this window? The server stays running.'):
+        elif (self.form_dirty or self._deployment_dirty() or
+              (self._ai_saved_model is not None and self.ai_model.text() != self._ai_saved_model)) and not self.confirm(
+                  'Close manager?', 'Discard unsaved registration, deployment or model edits and close this window? The server stays running.'):
             self.closing = False
             event.ignore()
         else:

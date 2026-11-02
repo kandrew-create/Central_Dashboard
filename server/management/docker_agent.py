@@ -20,7 +20,7 @@ from server.management.service import ManagerService, text
 
 
 ACTIONS = frozenset(('counts', 'catalog', 'sources', 'register', 'delete_source', 'rotate',
-                     'export', 'batches', 'machine_interpretations'))
+                     'export', 'batches', 'machine_interpretations', 'enable_machine_ai', 'disable_machine_ai'))
 
 
 class DockerAgent(ManagerService):
@@ -34,6 +34,19 @@ class DockerAgent(ManagerService):
         self.ca = Path(ca)
         self.connection_factory = connection_factory
         self.vault = LinuxVault(state)
+        self.ai_directory = Path(os.environ.get('LINKER_MANAGER_AI_DIR', str(Path(state) / 'ai-settings')))
+
+    def enable_machine_ai(self, model):
+        from server.machine_ai import LocalModel, save_configuration
+        LocalModel(model).check()
+        private_directory(self.ai_directory)
+        return save_configuration(self.ai_directory, model, True)
+
+    def disable_machine_ai(self):
+        from server.machine_ai import configuration, save_configuration
+        private_directory(self.ai_directory)
+        saved = configuration(self.ai_directory)
+        return save_configuration(self.ai_directory, saved['model'], False)
 
     @contextmanager
     def connection(self):
@@ -98,7 +111,8 @@ class DockerAgent(ManagerService):
                 (SELECT count(*) FROM platform.jobs WHERE status='failed') failed_jobs''').fetchone()
 
     def machine_interpretations(self, include_records=True):
-        result = dict(configuration=dict(enabled=False, model='Not configured in Docker'),
+        from server.machine_ai import configuration
+        result = dict(configuration=configuration(self.ai_directory),
                       rows=[], records_available=include_records)
         if include_records:
             with self.connection() as db:

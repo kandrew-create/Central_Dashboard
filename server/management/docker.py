@@ -25,12 +25,15 @@ class DockerSettings:
     https_port: int = 443
     database_port: int = 5432
     postgres_bin: Path = Path('Managed inside Docker')
+    http_port: int = 80
 
     def __post_init__(self):
         ServerSettings(self.workspace, self.postgres_bin, mode=self.mode, server_host=self.server_host,
                        listen_address=self.listen_address).validate_network()
         if type(self.https_port) is not int or not 1 <= self.https_port <= 65535:
             raise CollectorError('Choose a valid HTTPS port for the Docker server.')
+        if type(self.http_port) is not int or not 1 <= self.http_port <= 65535 or self.http_port == self.https_port:
+            raise CollectorError('Choose different valid HTTP and HTTPS ports for the Docker server.')
 
     @property
     def data_dir(self):
@@ -66,7 +69,11 @@ class DockerManagerService:
                 except BlockingIOError:
                     raise CollectorError('Setup is updating this workspace. Finish setup before opening its manager.') from None
                 fcntl.flock(stream, fcntl.LOCK_UN)
-        environment = private_read(workspace / '.env', 16384).decode('utf-8')
+        from server.management.docker_configuration import deployment_lock, recover_settings
+        with deployment_lock(workspace):
+            recover_settings(workspace)
+        self._environment = private_read(workspace / '.env', 16384)
+        environment = self._environment.decode('utf-8')
         values = {key.strip(): value.strip().strip('\"\'') for key, value in
                   (line.split('=', 1) for line in environment.splitlines() if '=' in line and not line.lstrip().startswith('#'))}
         try:
@@ -78,14 +85,18 @@ class DockerManagerService:
             raise CollectorError('The saved Docker HTTP and HTTPS ports must be different valid TCP ports.') from None
         self.settings = DockerSettings(workspace, project, mode=values.get('LINKER_MODE', 'local'),
                                        server_host=values.get('SCADA_HOSTNAME', 'localhost'),
-                                       listen_address=values.get('LINKER_LISTEN_ADDRESS', '127.0.0.1'), https_port=https_port)
+                                       listen_address=values.get('LINKER_LISTEN_ADDRESS', '127.0.0.1'), https_port=https_port,
+                                       http_port=http_port)
         self.config_keys = set(values)
         self.files = [workspace / 'deploy' / name for name in ('docker-compose.yml', 'docker-compose.wsl.yml')]
         if any(not file.is_file() for file in self.files):
             raise CollectorError('Select the WSL workspace containing its Compose file and saved deployment override.')
+        self._override = self.files[1].read_bytes()
         private_directory(self.settings.data_dir)
         private_write(self.settings.data_dir / 'agent-compose.yml',
                       b'services:\n  migrate:\n    logging: !override\n      driver: none\n')
+        private_write(self.settings.data_dir / 'ai-compose.yml',
+                      b'services:\n  migrate:\n    networks: !override\n      - database\n      - gateway\nvolumes:\n  ai-settings:\n')
         self.export_directory = private_directory(workspace / 'exports')
         self.ca_path = workspace / 'caddy-root.crt'
 
@@ -95,6 +106,11 @@ class DockerManagerService:
         for file in self.files:
             command.extend(('-f', str(file)))
         return command + list(arguments)
+
+    def _assert_current(self):
+        if (private_read(self.settings.workspace / '.env', 16384) != self._environment
+                or self.files[1].read_bytes() != self._override):
+            raise CollectorError('Deployment settings changed outside this window. Reopen the manager before continuing.')
 
     def _run(self, arguments, payload=None, timeout=90, agent=False):
         environment = {key: value for key, value in os.environ.items()
@@ -132,13 +148,21 @@ class DockerManagerService:
         return result.stdout
 
     def _rpc(self, action, arguments=None, export_parent=None):
-        command = ['-f', str(self.settings.data_dir / 'agent-compose.yml'),
-                   'run', '--rm', '--no-deps', '-T', '--user', f'{os.getuid()}:{os.getgid()}',
+        self._assert_current()
+        ai_action = action in ('machine_interpretations', 'enable_machine_ai', 'disable_machine_ai')
+        identity = '10001:10001' if ai_action else f'{os.getuid()}:{os.getgid()}'
+        command = ['-f', str(self.settings.data_dir / 'agent-compose.yml')]
+        if ai_action:
+            command += ['-f', str(self.settings.data_dir / 'ai-compose.yml')]
+        command += ['run', '--rm', '--no-deps', '-T', '--user', identity,
                    '-e', 'LINKER_MANAGER_HTTPS_PORT=' + str(self.settings.https_port),
                    '-e', 'LINKER_MANAGER_MODE=' + self.settings.mode,
                    '-e', 'LINKER_MANAGER_HOST=' + self.settings.server_host,
                    '-e', 'LINKER_MANAGER_LISTEN_ADDRESS=' + self.settings.listen_address,
                    '--volume', bind_mount(self.settings.data_dir, '/manager-state')]
+        if ai_action:
+            command += ['-e', 'LINKER_MANAGER_AI_DIR=/ai-settings', '-e', 'LINKER_DOCKER_LOCAL_AI=1',
+                        '--volume', self.settings.project + '_ai-settings:/ai-settings']
         if self.ca_path.is_file():
             command += ['--volume', bind_mount(self.ca_path, '/manager-ca.pem', True)]
         if export_parent:
@@ -201,6 +225,7 @@ class DockerManagerService:
         return result
 
     def start(self):
+        self._assert_current()
         before = self._services()
         try:
             try:
@@ -234,6 +259,47 @@ class DockerManagerService:
         self._run(['stop', '--timeout', '30'], timeout=150)
         return self.status()
 
+    def validate_settings(self, candidate):
+        from server.management.docker_configuration import probe_host
+        if candidate.workspace != self.settings.workspace or candidate.project != self.settings.project:
+            raise CollectorError('Keep this server workspace and project. Moving storage requires a separate migration.')
+        ports = []
+        if self._services().get('caddy', {}).get('State') == 'running':
+            if (candidate.listen_address == self.settings.listen_address or
+                    '0.0.0.0' in (candidate.listen_address, self.settings.listen_address)):
+                ports = [self.settings.https_port]
+                if self.settings.mode == 'local':
+                    ports.append(self.settings.http_port)
+        probe_host(candidate, ports)
+        return candidate
+
+    def save_settings(self, candidate):
+        from server.management.docker_configuration import deployment_lock, environment_update, save_pair
+        workspace = self.settings.workspace
+        with deployment_lock(workspace):
+            if private_read(workspace / '.env', 16384) != self._environment or self.files[1].read_bytes() != self._override:
+                raise CollectorError('Deployment settings changed outside this window. Reopen the manager before saving.')
+            if any(row.get('State') in ('running', 'restarting', 'paused') for row in self._services().values()):
+                raise CollectorError('Stop this Docker server before saving deployment settings, or use Apply and restart.')
+            self.validate_settings(candidate)
+            template = workspace / 'deploy/wsl' / ('docker-compose.network.yml.template' if candidate.mode == 'network'
+                                                   else 'docker-compose.wsl.yml.template')
+            content = environment_update(self._environment, candidate)
+            save_pair(workspace, content, template.read_bytes(), lambda: self._run(['config', '--quiet']))
+            self._environment, self._override = content, self.files[1].read_bytes()
+            self.settings = candidate
+        return candidate
+
+    def apply_settings(self, candidate):
+        self._assert_current()
+        self.validate_settings(candidate)
+        self.stop()
+        self.save_settings(candidate)
+        try:
+            return self.start()
+        except CollectorError as error:
+            raise CollectorError('Server settings were saved successfully, but startup failed. ' + str(error)) from None
+
     def catalog(self):
         return self._rpc('catalog')
 
@@ -253,9 +319,13 @@ class DockerManagerService:
         return self._rpc('batches', dict(source_id=source_id))
 
     def machine_interpretations(self, include_records=True):
-        if not include_records:
-            return dict(configuration=dict(enabled=False, model='Not configured in Docker'), rows=[], records_available=False)
-        return self._rpc('machine_interpretations')
+        return self._rpc('machine_interpretations', dict(include_records=include_records))
+
+    def enable_machine_ai(self, model):
+        return self._rpc('enable_machine_ai', dict(model=model))
+
+    def disable_machine_ai(self):
+        return self._rpc('disable_machine_ai')
 
     def export(self, source_id, path, password):
         path = Path(path).absolute()

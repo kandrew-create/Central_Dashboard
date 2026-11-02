@@ -8,6 +8,7 @@ COPY shared ./shared
 COPY deploy/requirements.lock ./deploy/requirements.lock
 RUN pip install --no-cache-dir -r deploy/requirements.lock && pip install --no-deps --no-cache-dir . \
     && useradd --uid 10001 --create-home scada \
+    && mkdir /ai-settings && chown 10001:10001 /ai-settings && chmod 700 /ai-settings \
     && chmod -R a+rX /app
 USER 10001:10001
 CMD ["uvicorn", "server.app.ingestion:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

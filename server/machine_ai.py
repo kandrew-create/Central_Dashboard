@@ -1,5 +1,6 @@
 """Local-only equipment-name suggestions. Model output never authorizes a mapping."""
 import json
+import os
 from pathlib import Path
 import re
 
@@ -53,11 +54,12 @@ class LocalModel:
     def __init__(self, model, client=None):
         self.model = model_name(model)
         self.client = client
+        self.endpoint = 'http://host.docker.internal:11434' if os.environ.get('LINKER_DOCKER_LOCAL_AI') == '1' else ENDPOINT
 
     def request(self, path, body=None):
         # Numeric loopback only, no environment proxies, redirects or cloud fallback.
         def send(client):
-            with client.stream('GET' if body is None else 'POST', ENDPOINT + path, json=body) as response:
+            with client.stream('GET' if body is None else 'POST', self.endpoint + path, json=body) as response:
                 response.raise_for_status()
                 data = bytearray()
                 for chunk in response.iter_bytes():

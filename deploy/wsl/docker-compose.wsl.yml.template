@@ -7,6 +7,11 @@ services:
     build: {target: base}
   worker:
     build: {target: base}
+    environment:
+      LINKER_SERVER_DATA_DIR: /ai-settings
+      LINKER_DOCKER_LOCAL_AI: '1'
+    volumes: [ai-settings:/ai-settings]
+    networks: !override [database, gateway]
   caddy:
     environment:
       LINKER_EXTERNAL_HTTPS_PORT: ${LINKER_HTTPS_PORT:-443}
@@ -17,3 +22,5 @@ services:
       - ./wsl/Caddyfile.local:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+volumes:
+  ai-settings:

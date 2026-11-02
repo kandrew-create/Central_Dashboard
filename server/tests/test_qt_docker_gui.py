@@ -18,6 +18,28 @@ except ImportError:
 
 @unittest.skipUnless(QApplication is not None, 'optional Qt Docker GUI dependency is not installed')
 class ModernDockerWindowTests(unittest.TestCase):
+    def test_deployment_save_keeps_success_feedback_when_database_is_stopped(self):
+        from dataclasses import replace
+        self.app.deployment_fields['https_port'].setText('9444')
+        self.service.save_settings.side_effect = lambda candidate: setattr(self.service, 'settings', candidate) or candidate
+        self.service.status.return_value = dict(self.status, database_ready=False, api_ready=False, worker_running=False,
+                                              error='Server is stopped')
+        self.service.machine_interpretations.side_effect = CollectorError('Optional AI read failed')
+        self.app.save_deployment()
+        self.wait_idle()
+        self.assertEqual(self.service.settings.https_port, 9444)
+        self.assertIn('saved successfully', self.app.footer.text())
+        self.assertIn(':9444/', self.app.overview_endpoint.text())
+        self.service.start.assert_not_called()
+
+    def test_model_refresh_retains_unsaved_entry_and_never_enables_ai(self):
+        self.app._show_ai_configuration(dict(enabled=False, model='saved-model'))
+        self.app.ai_model.setText('unsaved-model')
+        self.app._show_identification(dict(configuration=dict(enabled=False, model='saved-model'), rows=[], records_available=False))
+        self.assertEqual(self.app.ai_model.text(), 'unsaved-model')
+        self.service.enable_machine_ai.assert_not_called()
+        self.app.ai_model.setText('saved-model')
+
     @classmethod
     def setUpClass(cls):
         cls.application = QApplication.instance() or QApplication([])

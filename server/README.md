@@ -29,7 +29,7 @@ PostgreSQL 17 or 18 is a prerequisite for X2. The older X1 installer supports Po
 
 Follow the [Windows setup guide](../docs/central-server-windows.md) for certificates, firewall access and testing from another PC. See [operations and recovery](../docs/operations.md) for Linux deployment, backup, mapping approval and reprocessing.
 
-The source checkout also provides a native **WSL / Docker management GUI** through WSLg: server controls, source registration, encrypted collector setup export and saved identification results. It manages the separate Linux Compose deployment; published Windows installers are unchanged. See [WSL setup and usage](../docs/wsl-deployment.md).
+The source checkout also provides a native **WSL / Docker management GUI** through WSLg: server controls, source registration, encrypted collector setup export, editable deployment settings and local AI enable/disable/model controls with saved identification results. Use **Deployment → Validate settings**, then **Save settings** with the server stopped, or confirmed **Apply and restart**. It manages the separate Linux Compose deployment; published Windows installers are unchanged. See [WSL setup and usage](../docs/wsl-deployment.md).
 
 The separate [WSL / Docker online installer](../docs/wsl-installer.md) prepares this deployment and GUI without Windows Python. Build it with `deploy/wsl/build-installer.ps1`; it retains earlier Windows packages and existing Linux settings/data when rerun.
 

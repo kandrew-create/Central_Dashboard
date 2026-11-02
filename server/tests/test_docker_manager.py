@@ -20,6 +20,7 @@ class DockerCommandTests(unittest.TestCase):
         self.service.config_keys = {'MIGRATION_DATABASE_URL'}
         self.service.files = [Path(self.directory.name) / 'compose.yml']
         self.service.ca_path = Path(self.directory.name) / 'ca.pem'
+        self.service._assert_current = Mock()
 
     def test_custom_port_is_used_for_setup_and_health_and_agent(self):
         self.service.settings = DockerSettings(PurePosixPath('/tmp/linux-workspace'), https_port=9444)
@@ -173,7 +174,7 @@ class DockerAgentBoundaryTests(unittest.TestCase):
 
     def test_rejects_unknown_commands_and_export_paths_before_database_access(self):
         with patch('server.management.docker_agent.DockerAgent') as agent:
-            for request in ({'action': 'enable_machine_ai', 'arguments': {}},
+            for request in ({'action': 'execute_shell', 'arguments': {}},
                             {'action': 'export', 'arguments': {'path': '/etc/private'}}):
                 code, result = self.invoke(request)
                 self.assertEqual(code, 1)
