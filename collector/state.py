@@ -24,9 +24,8 @@ class State:
         self.path = config.state_path
         if self.path.is_symlink() or self.path.parent.is_symlink():
             raise CollectorError('Collector state must not use symbolic links.')
-        self.path.parent.mkdir(exist_ok=True)
-        if os.name == 'nt':
-            restrict_access(self.path.parent)
+        self.path.parent.mkdir(mode=0o700, exist_ok=True)
+        restrict_access(self.path.parent)
         try:
             self.db = sqlite3.connect(self.path, timeout=1, isolation_level=None)
             self.db.row_factory = sqlite3.Row
@@ -50,8 +49,7 @@ class State:
             prior_binding=self.get('binding')
             if prior_binding and prior_binding.get('generation_id'):
                 self.db.execute('INSERT OR IGNORE INTO generation_history VALUES (?)',(prior_binding['generation_id'],))
-            if os.name == 'nt':
-                restrict_access(self.path)
+            restrict_access(self.path)
         except (OSError, sqlite3.Error):
             raise CollectorError('Cannot open durable collector state; check disk and permissions.') from None
 

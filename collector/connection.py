@@ -15,7 +15,7 @@ def check_upload(config):
         raise CollectorError('Import server setup or save the upload URL, Source ID and Generation ID first.')
     try:token=load_password(config.upload_password_path)
     except CollectorError:
-        raise CollectorError('Cannot unlock the upload credential. Import server setup or store its credential under this Windows account.') from None
+        raise CollectorError('Cannot unlock the upload credential. Import server setup or store its credential under the collector account with its original protection key.') from None
     url=urlsplit(config.upload_url)
     endpoint=urlunsplit((url.scheme,url.netloc,'/v1/collector-check','',''))
     expected=dict(status='ready',source_id=config.source_id,generation_id=config.generation_id)

@@ -1,5 +1,6 @@
 """Strict local configuration for the first collector commissioning increment."""
 from dataclasses import dataclass, fields
+import os
 from pathlib import Path
 import re
 import tomllib
@@ -142,15 +143,15 @@ class CollectorConfig:
 
     @property
     def upload_password_path(self):
-        return self.path.parent / "secrets" / "upload-token.dpapi"
+        return self.path.parent / "secrets" / ("upload-token.dpapi" if os.name == 'nt' else 'upload-token.fernet')
 
     @property
     def privacy_key_path(self):
-        return self.path.parent / "secrets" / "privacy-key.dpapi"
+        return self.path.parent / "secrets" / ("privacy-key.dpapi" if os.name == 'nt' else 'privacy-key.fernet')
 
     @property
     def password_path(self):
-        return self.path.parent / "secrets" / "database-password.dpapi"
+        return self.path.parent / "secrets" / ("database-password.dpapi" if os.name == 'nt' else 'database-password.fernet')
 
     def table(self, logical_name):
         if logical_name not in TABLES:

@@ -17,13 +17,12 @@ from collector.tests.test_delivery import wire
 from collector.uploader import deliver
 
 
-@unittest.skipUnless(__import__('os').name=='nt','local certificate helper requires Windows private ACLs')
 class RealTlsTests(unittest.TestCase):
     def test_unknown_ca_fails_and_explicit_ca_succeeds_without_disabling_verification(self):
-        from deploy.local_server import certificates
+        from server.management.tls import ensure_certificates
         with tempfile.TemporaryDirectory() as temporary:
             directory=Path(temporary)
-            with patch('deploy.local_server.LOCAL',directory): certificates()
+            ensure_certificates(directory)
             config=replace(default_config(directory/'config.toml'),source_id=str(uuid4()),generation_id=str(uuid4()),
                            upload_enabled=True,min_free_bytes=0)
             state=State(config)

@@ -2,8 +2,11 @@
 import argparse
 from getpass import getpass
 import json
+import os
 from pathlib import Path
+import signal
 import sys
+import threading
 
 from collector import __version__
 from collector.config import EXAMPLE, PROFILE, TABLES, load_config
@@ -17,15 +20,20 @@ def parser():
     cli.add_argument("--version", action="version", version=__version__)
     cli.add_argument("--config", type=Path, default=Path("collector-local/config.toml"))
     commands = cli.add_subparsers(dest="command", required=True)
-    commands.add_parser("init", help="Create private local configuration in a new directory (Windows)")
-    commands.add_parser("set-password", help="Protect the prompted database password with current-user DPAPI")
+    commands.add_parser("init", help="Create private local configuration in a new directory")
+    key = commands.add_parser('create-key', help='Create a new Linux credential encryption key; never replaces a key')
+    key.add_argument('path', type=Path)
+    setup = commands.add_parser('import-setup', help='Import a locally selected encrypted server setup; prompts for its password')
+    setup.add_argument('path', type=Path)
+    commands.add_parser('test-server', help='Verify HTTPS and source credentials without uploading records')
+    commands.add_parser("set-password", help="Protect the prompted database password under the collector account")
     commands.add_parser("check-config", help="Validate local configuration without a database connection")
     commands.add_parser("test-connection", help="Check read-only account and both approved table schemas")
     commands.add_parser("gui", help="Open the local desktop setup and preview window")
     commands.add_parser('collect', help='Run one bounded collection/delivery cycle')
     commands.add_parser('run', help='Run the durable local scheduler until stopped')
     commands.add_parser('status', help='Show local queue, schedule and delivery status')
-    commands.add_parser('set-upload-token', help='Protect the prompted upload credential with DPAPI')
+    commands.add_parser('set-upload-token', help='Protect the prompted upload credential')
     commands.add_parser('set-privacy-key', help='Protect the prompted operator-field hashing key')
     generation = commands.add_parser('new-generation', help='Authorize a provisioned generation in a new setup; retains old pending state')
     generation.add_argument('--generation-id', required=True)
@@ -49,7 +57,13 @@ def main(argv=None):
             except ImportError:
                 raise CollectorError("The desktop interface requires Python's Tcl/Tk component. Enable Tcl/Tk in your Python installation.") from None
             return launch(args.config)
-        if args.command == "init":
+        if args.command == 'create-key':
+            if os.name != 'posix':
+                raise CollectorError('Windows uses current-user DPAPI; a Linux encryption key is not needed.')
+            from collector.posix_secrets import create_key
+            create_key(args.path)
+            result = {'status': 'key_created'}
+        elif args.command == "init":
             secrets.initialize(args.config, EXAMPLE)
             result = {"status": "created", "next": "Edit local configuration, then run set-password under the collector account."}
         else:
@@ -59,7 +73,14 @@ def main(argv=None):
                 if password != getpass("Confirm database password: "):
                     raise CollectorError("Passwords do not match; existing credentials were preserved.")
                 secrets.save_password(config.password_path, password)
-                result = {"status": "password_protected", "scope": "current Windows account"}
+                result = {"status": "password_protected", "scope": "current collector account"}
+            elif args.command == 'import-setup':
+                from collector.desktop import DesktopService
+                DesktopService().import_setup(config, args.path, getpass('Setup file password (not displayed): '))
+                result = {'status': 'setup_imported'}
+            elif args.command == 'test-server':
+                from collector.connection import check_upload
+                result = check_upload(config)
             elif args.command in {'set-upload-token', 'set-privacy-key'}:
                 value = getpass('Credential/key (not displayed): ')
                 if len(value) < 32 or value != getpass('Confirm credential/key: '):
@@ -71,7 +92,14 @@ def main(argv=None):
             elif args.command in {'collect', 'status', 'run'}:
                 from collector.runtime import cycle, status, run
                 if args.command == 'run':
-                    run(config.path)
+                    stop = threading.Event()
+                    previous = {kind: signal.signal(kind, lambda *_: stop.set())
+                                for kind in (signal.SIGINT, signal.SIGTERM)}
+                    try:
+                        run(config.path, stop=stop)
+                    finally:
+                        for kind, handler in previous.items():
+                            signal.signal(kind, handler)
                     return 0
                 result = cycle(config) if args.command == 'collect' else status(config)
             elif args.command == 'new-generation':

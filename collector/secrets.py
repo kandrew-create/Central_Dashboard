@@ -1,4 +1,4 @@
-"""Windows current-user DPAPI and private ACLs; no plaintext fallback."""
+"""Windows DPAPI or Linux authenticated encryption; no plaintext fallback."""
 import os
 from pathlib import Path
 import tempfile
@@ -22,6 +22,9 @@ def _windows():
 
 
 def restrict_access(path):
+    if os.name == 'posix':
+        from collector.posix_secrets import restrict_access as restrict
+        return restrict(path)
     api, con, _crypt, security = _windows()
     try:
         from ntsecuritycon import FILE_ALL_ACCESS
@@ -44,10 +47,11 @@ def restrict_access(path):
 
 def initialize(path, content):
     """Use a new dedicated directory; never change ACLs on an existing shared folder."""
-    _windows()
+    if os.name != 'posix':
+        _windows()
     path = Path(path).resolve()
     try:
-        path.parent.mkdir(parents=True, exist_ok=False)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=False)
         restrict_access(path.parent)
         with path.open("x", encoding="utf-8", newline="\n") as stream:
             stream.write(content)
@@ -57,6 +61,9 @@ def initialize(path, content):
 
 
 def save_password(path, password):
+    if os.name == 'posix':
+        from collector.posix_secrets import save_password as save
+        return save(path, password)
     _api, con, crypt, _security = _windows()
     if not isinstance(password, str) or not password or len(password) > 4096 or "\x00" in password:
         raise CollectorError("Enter a nonempty database password of at most 4096 characters.")
@@ -85,6 +92,9 @@ def save_password(path, password):
 
 
 def load_password(path):
+    if os.name == 'posix':
+        from collector.posix_secrets import load_password as load
+        return load(path)
     _api, con, crypt, _security = _windows()
     try:
         path = Path(path)
@@ -102,6 +112,9 @@ def load_password(path):
 
 def write_private_file(path, content):
     """Replace a local settings file atomically, with its private ACL in place first."""
+    if os.name == 'posix':
+        from collector.posix_secrets import write_private_file as write
+        return write(path, content)
     _windows()
     temporary = None
     try:

@@ -183,7 +183,7 @@ class DesktopWindowTests(unittest.TestCase):
         self.assertFalse(app.collect_button.instate(('disabled',)))
         app.collect_now()
         self.wait_idle()
-        self.service.cycle.assert_called_once_with(self.config)
+        self.service.cycle.assert_called_once_with(self.config, stop=app.cycle_stop)
         self.assertIn('test success',app.collection_status.get())
         self.assertEqual(app.status.get(),'Collection status updated.')
         app.upload_token.set('TEST_ONLY_UPLOAD_CREDENTIAL')
@@ -192,6 +192,69 @@ class DesktopWindowTests(unittest.TestCase):
         self.wait_idle()
         self.service.store_upload_token.assert_called_once_with(self.config,'TEST_ONLY_UPLOAD_CREDENTIAL')
         self.assertEqual(app.status.get(),'Upload credential protected for this Windows account.')
+
+    def test_stop_cancels_manual_collection_and_reports_completion(self):
+        self.config = replace(self.config, collection_enabled=True)
+        self.service.load.return_value = self.config
+        started = threading.Event()
+        def collecting(config, stop):
+            started.set()
+            self.assertTrue(stop.wait(2))
+            return {'pending_batches': 2, 'pending_bytes': 100}
+        self.service.cycle.side_effect = collecting
+        app = self.create()
+        app.collect_now()
+        self.assertTrue(started.wait(1))
+        self.assertFalse(app.stop_button.instate(('disabled',)))
+        app.stop_auto()
+        self.wait_idle()
+        self.assertFalse(app.manual_collecting)
+        self.assertTrue(app.stop_button.instate(('disabled',)))
+        self.assertFalse(app.collect_button.instate(('disabled',)))
+        self.assertIn('Collection stopped', app.status.get())
+        self.assertIn('Pending batches: 2', app.collection_status.get())
+
+    def test_scheduler_stop_refreshes_controls_without_a_status_request(self):
+        self.config = replace(self.config, collection_enabled=True)
+        self.service.load.return_value = self.config
+        app = self.create()
+        started = threading.Event()
+        def scheduled(path, stop):
+            started.set()
+            stop.wait(2)
+        with patch('collector.runtime.run', side_effect=scheduled):
+            app.start_auto()
+            self.assertTrue(started.wait(1))
+            self.assertTrue(app.collect_button.instate(('disabled',)))
+            app.stop_auto()
+            app.auto_thread.join(1)
+            deadline = time.monotonic() + 1
+            while app.auto_thread is not None and time.monotonic() < deadline:
+                self.root.update()
+                time.sleep(.01)
+        self.assertIsNone(app.auto_thread)
+        self.assertIn('Automatic collection stopped', app.status.get())
+        self.assertTrue(app.stop_button.instate(('disabled',)))
+        self.assertFalse(app.auto_button.instate(('disabled',)))
+        self.assertFalse(app.import_button.instate(('disabled',)))
+
+    def test_closing_signals_a_manual_collection_to_stop(self):
+        self.config = replace(self.config, collection_enabled=True)
+        self.service.load.return_value = self.config
+        started = threading.Event()
+        def collecting(config, stop):
+            started.set()
+            stop.wait(2)
+            return {'pending_batches': 0}
+        self.service.cycle.side_effect = collecting
+        app = self.create()
+        app.collect_now()
+        self.assertTrue(started.wait(1))
+        app.close()
+        self.assertTrue(app.cycle_stop.is_set())
+        self.assertTrue(app.closing)
+        app.closing = False
+        self.wait_idle()
 
     def test_import_server_setup_updates_saved_identity_and_clears_credential_fields(self):
         app=self.create()

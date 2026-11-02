@@ -19,7 +19,7 @@ def deliver(config, state, client=None):
     try:
         token = load_password(config.upload_password_path)
     except CollectorError:
-        raise CollectorError('Cannot unlock the upload credential. Store the server-provisioned token under the collector Windows account.') from None
+        raise CollectorError('Cannot unlock the upload credential. Store the server-provisioned token under the collector account with its original protection key.') from None
     owned = client is None
     try:
         client = client or httpx.Client(verify=ssl.create_default_context(cafile=config.upload_ca_file or None), follow_redirects=False, trust_env=False,

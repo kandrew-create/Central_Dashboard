@@ -38,10 +38,17 @@ class SetupBundleTests(unittest.TestCase):
         with self.assertRaises(SetupError):encode_setup(payload(),'short')
 
 
-@unittest.skipUnless(os.name=='nt','Windows DPAPI provisioning')
+@unittest.skipUnless(os.name in {'nt', 'posix'}, 'requires a supported credential backend')
 class SetupImportTests(unittest.TestCase):
     def setUp(self):
         self.folder=tempfile.TemporaryDirectory();self.addCleanup(self.folder.cleanup)
+        if os.name == 'posix':
+            from collector.posix_secrets import create_key
+            key = Path(self.folder.name)/'collector.key'
+            create_key(key)
+            environment = patch.dict(os.environ, COLLECTOR_SECRET_KEY_FILE=str(key))
+            environment.start()
+            self.addCleanup(environment.stop)
         self.service=DesktopService()
         self.config=self.service.save(replace(default_config(Path(self.folder.name)/'collector/config.toml'),
                                               host='localhost',user='Scada_Collector',all_history=True,

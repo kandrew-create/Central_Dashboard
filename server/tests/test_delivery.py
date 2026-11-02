@@ -528,7 +528,7 @@ class DeliveryIntegrationTests(PostgresCase):
 
     def test_date_range_is_retained_on_later_scans_and_new_ids_are_collected(self):
         with tempfile.TemporaryDirectory() as temporary:
-            config=replace(default_config(Path(temporary)/'config.toml'),host='127.0.0.1',port=int(os.environ['PGPORT']),database=self.database,user=self.roles[2],
+            config=replace(default_config(Path(temporary)/'config.toml'),host=os.environ['PGHOST'],port=int(os.environ['PGPORT']),database=self.database,user=self.roles[2],
                 source_id=uid(6),generation_id=uid(7),collection_enabled=True,history_start='2026-10-28T00:00:00',history_end='2026-10-29T00:00:00',max_pages=10,min_free_bytes=0)
             self._run("""INSERT INTO public.eventhistory(ev_time,ev_time_ms,ev_message) VALUES
                 ('2026-10-01',0,'excluded history'),('2026-10-28',0,'approved history');""")
@@ -559,7 +559,7 @@ class DeliveryIntegrationTests(PostgresCase):
     def test_source_scans_resume_equal_markers_and_detect_old_id_and_null_marker_changes(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        config = replace(default_config(Path(directory.name)/'config.toml'),host='127.0.0.1',port=int(os.environ['PGPORT']),database=self.database,user=self.roles[2],
+        config = replace(default_config(Path(directory.name)/'config.toml'),host=os.environ['PGHOST'],port=int(os.environ['PGPORT']),database=self.database,user=self.roles[2],
                          source_id=uid(6),generation_id=uid(7),collection_enabled=True,all_history=True,page_rows=1,max_pages=1,
                          marker_verified=True,scan_mode='marker',timezone='America/Toronto',min_free_bytes=0)
         self._run("""INSERT INTO public.alarmhistory(al_tag,al_active,last_update,last_update_ms)
@@ -585,7 +585,7 @@ class DeliveryIntegrationTests(PostgresCase):
 
     def test_overlap_catches_a_late_commit_behind_the_completed_id_cursor(self):
         with tempfile.TemporaryDirectory() as temporary:
-            config=replace(default_config(Path(temporary)/'config.toml'),host='127.0.0.1',port=int(os.environ['PGPORT']),database=self.database,user=self.roles[2],
+            config=replace(default_config(Path(temporary)/'config.toml'),host=os.environ['PGHOST'],port=int(os.environ['PGPORT']),database=self.database,user=self.roles[2],
                 source_id=uid(6),generation_id=uid(7),collection_enabled=True,all_history=True,page_rows=1,max_pages=1,
                 marker_verified=True,scan_mode='marker',timezone='America/Toronto',reconcile_ids=3,min_free_bytes=0)
             late=psycopg.connect(host=os.environ['PGHOST'],port=int(os.environ['PGPORT']),user=os.environ['PGUSER'],password=os.environ.get('PGPASSWORD',''),dbname=self.database)

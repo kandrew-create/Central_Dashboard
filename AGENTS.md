@@ -85,6 +85,10 @@ Source deletion is a confirmed registration removal in both operating modes: set
 
 Collector setup import must not be blocked by unsaved fields supplied by the setup file itself (IDs, URL, upload enable flag and CA path). Import against the last saved local configuration; preserve unsaved database/history/schedule changes by requiring an explicit save, and retain identity/queue/scheduler-lock guards. Explain missing local setup and show protected-credential presence without displaying secrets; Test server verifies validity.
 
+Collector Stop must signal both manual and automatic collection, wait for the current bounded operation, retain pending uploads, and refresh controls when the scheduler exits. Window closing must also signal a manual run; never terminate a process to bypass normal collection shutdown.
+
+Collector Linux/WSL deployment uses `deploy/docker-compose.collector.yml`; see [setup and verification](docs/collector-wsl-docker.md). Preserve both state and encryption-key volumes. Linux credentials require a private, collector-owned `COLLECTOR_SECRET_KEY_FILE`; Windows DPAPI files are not portable to Linux. Never run native and container Collectors concurrently for one source or replace an existing queue with empty state. Validate the Collector Compose file separately; Central Server runtime builds select `base`, while test builds select `test`.
+
 Validate the Docker Compose template without starting services:
 
 ```powershell
@@ -112,3 +116,4 @@ Docker manager startup reports safe engine/HTTPS-port/mount errors. A Caddyfile 
 ## Latest project change
 
 2026-11-01: Added specific safe Docker startup errors and one gateway-only retry for stale WSL Caddyfile mounts. Recovered the live WSL endpoint by starting Docker Desktop, refreshing its gateway and stopping the configured Windows server that held port 8443; database identity, registration, credentials and CA were preserved. Fourteen Windows and 29 Linux adapter/GUI checks passed. Actual remote Collector communication remains unverified. See [startup recovery and evidence](docs/wsl-deployment.md#startup-errors-and-recovery).
+2026-11-01: Added Collector Linux/WSL Docker deployment, protected Linux credentials, CLI setup import/server checks and graceful scheduler signals. Verified Windows (218 passed, 4 skipped), Linux (164 passed, 58 skipped), container queue retention and remote TCP reachability. Authenticated two-PC testing awaits fresh server setup after the existing CA/address mismatch; see [verification](docs/collector-wsl-docker-verification-2026-11-01.md). Existing Windows state and published X2 assets are unchanged.

@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import tempfile
 import unittest
 
@@ -20,7 +21,8 @@ class ConfigTests(unittest.TestCase):
         config = self.load()
         self.assertEqual(config.table("alarmhistory"), "alarmhistory")
         self.assertEqual(config.timezone, "")
-        self.assertEqual(config.password_path, self.path.parent.resolve() / "secrets/database-password.dpapi")
+        suffix = 'dpapi' if os.name == 'nt' else 'fernet'
+        self.assertEqual(config.password_path, self.path.parent.resolve() / f"secrets/database-password.{suffix}")
         self.assertNotIn("password =", EXAMPLE)
         shipped = Path(__file__).resolve().parents[1] / "config.example.toml"
         self.assertEqual(load_config(shipped).preview_rows, config.preview_rows)

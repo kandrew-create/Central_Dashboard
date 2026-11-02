@@ -69,6 +69,14 @@ class DesktopPersistenceTests(unittest.TestCase):
         self.assertEqual(updated.password_path.read_bytes(), encrypted_before)
         self.assertNotIn("TEST-ONLY-desktop-password", self.path.read_text(encoding="utf-8"))
 
+    def test_manual_cycle_forwards_its_stop_signal(self):
+        import threading
+        initial = self.service.save(default_config(self.path))
+        stop = threading.Event()
+        with patch('collector.runtime.cycle', return_value={'pending_batches': 0}) as cycle:
+            self.assertEqual(self.service.cycle(initial, stop=stop), {'pending_batches': 0})
+        cycle.assert_called_once_with(initial, stop=stop)
+
     def test_new_setup_cannot_overwrite_an_existing_file(self):
         initial = self.service.save(default_config(self.path))
         with self.assertRaisesRegex(CollectorError, "already exists"):

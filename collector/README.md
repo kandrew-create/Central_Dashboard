@@ -6,6 +6,8 @@ The native Windows GUI and CLI provide protected connection setup, bounded previ
 
 ## Desktop use
 
+For the Linux CLI/scheduler, including Docker Desktop on WSL 2, see [Collector WSL and Docker setup](../docs/collector-wsl-docker.md). The separate Collector Compose project preserves its queue and uses a separately mounted credential key. Native Windows operation continues to use DPAPI.
+
 Open **Launch Collector.cmd**, or run:
 
 ```powershell
@@ -16,7 +18,7 @@ Open **Launch Collector.cmd**, or run:
 2. Test the connection and inspect the bounded preview. Original strings, codes, flags, nullable times and separate milliseconds are preserved. Timezone selection is available in the GUI; unknown, ambiguous and invalid times are flagged without guessed UTC.
 3. On **Collection & upload**, enter the provisioned source/generation IDs and locally approve an initial date range or all history. Choose the privacy policy, resource limits and schedule. Enable collection and save settings.
 4. Enter the fixed HTTPS destination. Public CA verification is the default. An explicit local CA file supports the isolated commissioning server without installing global trust. Store the upload credential, enable upload and save settings.
-5. Use **Collect now**, or **Start automatic collection**. Refresh status for queue usage, last successful upload, latest confirmed source time, next run and errors. **Stop** and window closing wait for the current bounded operation. GUI scheduling ends when the window closes.
+5. Use **Collect now**, or **Start automatic collection**. Refresh status for queue usage, last successful upload, latest confirmed source time, next run and errors. **Stop** cancels either a manual run or automatic collection after the current bounded database/network operation, preserving pending uploads. The window reports when stopping completes and restores its controls automatically. Window closing also signals collection to stop and waits for that operation. GUI scheduling ends when the window closes.
 
 Opening settings clears credential entry fields. Editing connection/settings invalidates the preview connection check. External file changes require reopening settings before manual operations. Do not run the GUI scheduler and service together for the same setup; process locks prevent concurrent schedules/cycles.
 
@@ -56,7 +58,7 @@ HTTPS uses certificate/hostname verification, fixed locally configured URLs, no 
 & .venv/Scripts/python.exe -m collector run
 ```
 
-Global `--config PATH` goes before the subcommand. Secrets are hidden prompts and current-user DPAPI blobs, never TOML values or password arguments. Scheduled interval/daily/weekly runs persist their next occurrence, coalesce missed runs into one catch-up, and claim the occurrence before work. DST folds run at their first occurrence; gaps use the first valid minute after the gap.
+Global `--config PATH` goes before the subcommand. Secrets use hidden prompts and current-user DPAPI blobs on Windows, never TOML values or password arguments. Linux uses encrypted `.fernet` files with a separately supplied private key; see the [WSL/Docker guide](../docs/collector-wsl-docker.md). `import-setup PATH` and `test-server` provide setup import and authenticated server testing through the CLI. Scheduled interval/daily/weekly runs persist their next occurrence, coalesce missed runs into one catch-up, and claim the occurrence before work. DST folds run at their first occurrence; gaps use the first valid minute after the gap.
 
 For a reviewed source reset, provision a new generation centrally, then authorize it locally:
 

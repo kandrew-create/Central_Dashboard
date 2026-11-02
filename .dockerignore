@@ -12,6 +12,10 @@ dist
 .pytest_cache
 **/secrets
 **/*.dpapi
+**/*.fernet
+collector-handoff
+collector-linux
+**/*.key
 **/*.sqlite3*
 .env
 .env.*

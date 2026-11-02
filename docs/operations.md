@@ -20,6 +20,8 @@ The first real-history test was explicitly authorized by the user. It copied the
 
 For the isolated Docker Desktop deployment on this Windows development PC, see [Central Server on WSL 2](wsl-deployment.md), including local HTTPS, start/stop commands and verification limits.
 
+For the separate Collector Linux/WSL deployment, use the [Collector WSL and Docker guide](collector-wsl-docker.md). Its Compose project does not start the Central Server or publish ports. Preserve its state and encryption-key volumes during maintenance.
+
 Use the same application image for API and worker with separate restricted login credentials. Copy `.env.example` to a protected `.env` and replace every placeholder. Keep passwords high entropy and URL-encode them in connection URLs. API/worker URLs must use the corresponding `scada_api_login`/`scada_worker_login` passwords. Set the approved HTTPS hostname and its DNS first.
 
 ```sh

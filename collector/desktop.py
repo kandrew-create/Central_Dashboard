@@ -43,7 +43,7 @@ def config_document(config):
 
 def serialize_config(config):
     document = config_document(config)
-    lines = ["# SCADA Collector local settings. Passwords are stored separately with Windows protection.",
+    lines = ["# SCADA Collector local settings. Credentials are protected separately under the collector account.",
              "version = 1", ""]
     for section in document:
         if section == 'version':
@@ -91,10 +91,10 @@ class DesktopService:
         from collector.setup_import import import_setup
         return import_setup(self, config, path, password)
 
-    def cycle(self, config):
+    def cycle(self, config, stop=None):
         require_current(config)
         from collector.runtime import cycle
-        return cycle(config)
+        return cycle(config, stop=stop)
 
     def status(self, config):
         require_current(config)
@@ -145,7 +145,7 @@ class DesktopService:
         try:
             password = secrets.load_password(config.password_path)
         except CollectorError:
-            raise CollectorError("Cannot unlock the saved password. Store it again using the collector's Windows account.") from None
+            raise CollectorError("Cannot unlock the saved password. Check the collector account and its original credential protection before storing it again.") from None
         return SourceReader(config, password)
 
 

@@ -18,6 +18,9 @@ dist/
 *.db-wal
 *.sqlite3*
 *.dpapi
+*.fernet
+/collector-handoff/
+/collector-linux/
 *.key
 *.p12
 *.pfx

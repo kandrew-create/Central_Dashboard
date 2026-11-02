@@ -33,6 +33,8 @@ class CollectorWindow:
         self.detail_windows = []
         self.auto_thread = None
         self.auto_stop = threading.Event()
+        self.cycle_stop = threading.Event()
+        self.manual_collecting = False
         self.collection_status = tk.StringVar(root, 'Collection is stopped. Configure and save settings before starting.')
         self.upload_token = tk.StringVar(root)
         self.upload_credential_status = tk.StringVar(root)
@@ -265,10 +267,17 @@ class CollectorWindow:
         self.status.set(message)
 
     def collect_now(self):
-        if self.busy or self._is_dirty() or self.password.get():
+        if self.busy or self._is_dirty() or self.password.get() or (self.auto_thread and self.auto_thread.is_alive()):
             return
         config = self.saved
-        self._start('Collecting changed records and delivering pending batches...', lambda: self.service.cycle(config), self._show_collection_status)
+        self.cycle_stop.clear()
+        self.manual_collecting = True
+        def completed(result):
+            self._show_collection_status(result)
+            if self.cycle_stop.is_set():
+                self.status.set('Collection stopped. Pending uploads are preserved.')
+        self._start('Collecting changed records and delivering pending batches...',
+                    lambda: self.service.cycle(config, stop=self.cycle_stop), completed)
 
     def refresh_collection_status(self):
         if not self.busy and not self._is_dirty():
@@ -335,7 +344,9 @@ class CollectorWindow:
 
     def stop_auto(self):
         self.auto_stop.set()
-        self.collection_status.set('Stopping after the current bounded operation finishes.')
+        self.cycle_stop.set()
+        self._collection_message('Stopping after the current bounded operation finishes.')
+        self._refresh_actions()
 
     def _build_preview(self, parent):
         card = ttk.Frame(parent, style="Card.TFrame", padding=20)
@@ -419,9 +430,9 @@ class CollectorWindow:
         self.details_button.configure(state="normal" if self.records and not self.busy else "disabled")
         self.save_button.configure(state="normal" if not self.busy and self._is_dirty() else "disabled")
         running = self.auto_thread is not None and self.auto_thread.is_alive()
-        self.collect_button.configure(state='normal' if saved and self.saved.collection_enabled and not self.busy and not self.password.get() else 'disabled')
+        self.collect_button.configure(state='normal' if saved and self.saved.collection_enabled and not self.busy and not running and not self.password.get() else 'disabled')
         self.auto_button.configure(state='normal' if saved and self.saved.collection_enabled and not self.busy and not running else 'disabled')
-        self.stop_button.configure(state='normal' if running else 'disabled')
+        self.stop_button.configure(state='normal' if (running and not self.auto_stop.is_set()) or (self.manual_collecting and not self.cycle_stop.is_set()) else 'disabled')
         self.token_button.configure(state='normal' if saved and not self.busy else 'disabled')
         self.import_button.configure(state='normal' if not self.busy and not running else 'disabled')
         self.server_test_button.configure(state='normal' if saved and not self.busy and self.saved.upload_url and not self.upload_token.get() else 'disabled')
@@ -506,6 +517,7 @@ class CollectorWindow:
             pass
         else:
             self.busy = False
+            self.manual_collecting = False
             self.progress.stop()
             self.progress.configure(mode="determinate", value=0)
             if success:
@@ -517,6 +529,11 @@ class CollectorWindow:
                 self.status.set(result)
                 if not self.closing:
                     messagebox.showerror("Collector", result, parent=self.root)
+            self._refresh_actions()
+        if self.auto_thread is not None and not self.auto_thread.is_alive():
+            self.auto_thread = None
+            if self.auto_stop.is_set():
+                self._collection_message('Automatic collection stopped. Pending uploads are preserved.')
             self._refresh_actions()
         if self.closing and not self.busy and not (self.auto_thread and self.auto_thread.is_alive()):
             self.root.destroy()
@@ -695,6 +712,7 @@ class CollectorWindow:
     def close(self):
         if self.busy or (self.auto_thread and self.auto_thread.is_alive()):
             self.auto_stop.set()
+            self.cycle_stop.set()
             self.closing = True
             self.status.set("Finishing the current operation before closing…")
             return

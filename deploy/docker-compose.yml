@@ -3,6 +3,7 @@ x-app: &app
   build:
     context: ..
     dockerfile: deploy/Dockerfile
+    target: base
   restart: unless-stopped
   read_only: true
   tmpfs: [/tmp]

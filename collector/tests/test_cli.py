@@ -1,6 +1,7 @@
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
+import signal
 import sys
 from pathlib import Path
 import tempfile
@@ -71,3 +72,29 @@ class CliTests(unittest.TestCase):
             self.assertEqual(self.run_cli("gui"), 1)
         self.assertIn("Tcl/Tk", self.stderr.getvalue())
         self.assertNotIn("Traceback", self.stderr.getvalue())
+
+    def test_server_check_does_not_read_source_database_or_run_collection(self):
+        with patch('collector.connection.check_upload', return_value={'status': 'ready'}) as check, \
+                patch('collector.cli.SourceReader') as reader, patch('collector.runtime.cycle') as cycle:
+            self.assertEqual(self.run_cli('test-server'), 0)
+            check.assert_called_once()
+            reader.assert_not_called()
+            cycle.assert_not_called()
+        self.assertEqual(json.loads(self.stdout.getvalue()), {'status': 'ready'})
+
+    def test_setup_password_is_prompted_and_not_printed(self):
+        with patch('collector.cli.getpass', return_value='test-only-file-password'), \
+                patch('collector.desktop.DesktopService.import_setup') as setup:
+            self.assertEqual(self.run_cli('import-setup', str(self.path.parent/'setup.linker-collector')), 0)
+            self.assertEqual(setup.call_args.args[2], 'test-only-file-password')
+        self.assertNotIn('test-only-file-password', self.stdout.getvalue() + self.stderr.getvalue())
+
+    def test_sigterm_signals_scheduler_and_restores_handlers(self):
+        original = signal.getsignal(signal.SIGTERM)
+        def scheduler(path, stop):
+            self.assertFalse(stop.is_set())
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+            self.assertTrue(stop.is_set())
+        with patch('collector.runtime.run', side_effect=scheduler):
+            self.assertEqual(self.run_cli('run'), 0)
+        self.assertEqual(signal.getsignal(signal.SIGTERM), original)

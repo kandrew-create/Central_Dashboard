@@ -12,11 +12,20 @@ RUN pip install --no-cache-dir -r deploy/requirements.lock && pip install --no-d
 USER 10001:10001
 CMD ["uvicorn", "server.app.ingestion:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
 
+FROM base AS collector
+USER root
+RUN mkdir -p /var/lib/linker-collector /run/collector-key \
+    && chown 10001:10001 /var/lib/linker-collector /run/collector-key \
+    && chmod 700 /var/lib/linker-collector /run/collector-key
+USER 10001:10001
+ENTRYPOINT ["python", "-m", "collector", "--config", "/var/lib/linker-collector/setup/config.toml"]
+CMD ["run"]
+
 FROM base AS test
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client \
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client libtk8.6 \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir '.[test]'
+    && pip install --no-cache-dir '.[test,local]'
 COPY tests ./tests
-COPY deploy/bootstrap_roles.sql ./deploy/bootstrap_roles.sql
+COPY deploy ./deploy
 CMD ["pytest", "-q"]

@@ -25,6 +25,8 @@ For development on Windows with WSL 2 and Docker Desktop, a native Linux managem
 
 A separate [WSL / Docker online package installer](docs/wsl-installer.md) prepares prerequisites, private Python/Qt, the server and its GUI shortcut. Build with `deploy/wsl/build-installer.ps1`; outputs and checksums go into a fresh `dist/wsl-docker/0.6.2-*` directory. Existing Windows installers are retained.
 
+The Collector CLI/scheduler also supports Linux and Docker Desktop on WSL 2. See [Collector WSL/Docker setup](docs/collector-wsl-docker.md) for its separate Compose deployment, protected credentials and Network-mode commissioning.
+
 Version 0.4 adds Local testing and Network server modes, saved listener/hostname settings, managed matching HTTPS certificates, and an authenticated collector connection test. Collection, durable queueing and encrypted setup export/import remain available. Customer read APIs, the Web Portal, analytics, Grafana, OIDC and notifications remain later phases.
 
 Open Central Server from its installed shortcut, or use **Launch Central Server.cmd** with a configured source-checkout Python environment. Use **Server status** to start/stop the central database, HTTPS API and worker; **Register SCADA source** to create IDs and a protected credential; and **Sources & collector setup** to export a password-encrypted `.linker-collector` file. In the Collector, open **3 Collection & upload → Import server setup**. See the [Central Server Windows guide](docs/central-server-windows.md). Reuse an existing registered source when appropriate; registering the same source again is unnecessary.

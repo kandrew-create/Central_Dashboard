@@ -1,0 +1,39 @@
+name: linker-collector
+x-collector: &collector
+  image: linker-scada-collector:local
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+    target: collector
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: {max-size: '10m', max-file: '3'}
+
+services:
+  collector:
+    <<: *collector
+    restart: unless-stopped
+    stop_grace_period: 120s
+    environment:
+      COLLECTOR_SECRET_KEY_FILE: /run/collector-key/collector.key
+    volumes:
+      - collector-data:/var/lib/linker-collector
+      - collector-key:/run/collector-key:ro
+      - ${COLLECTOR_HANDOFF_DIR:-../collector-handoff}:/handoff:ro
+    # Outbound database/HTTPS only; no published ports or inbound service.
+  key-init:
+    <<: *collector
+    profiles: [setup]
+    restart: 'no'
+    network_mode: none
+    command: [create-key, /run/collector-key/collector.key]
+    volumes:
+      - collector-key:/run/collector-key
+
+volumes:
+  collector-data:
+  collector-key:
