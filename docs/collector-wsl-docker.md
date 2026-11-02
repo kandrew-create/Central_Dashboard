@@ -10,6 +10,8 @@ The Docker Collector runs as UID/GID 10001, opens no network listener, and retai
 
 Start Docker Desktop, enable its WSL 2 engine and select Linux containers. Commands below run from the repository root in PowerShell or an integrated WSL distribution. Docker Desktop also supports these Docker commands from Windows without installing an additional Linux distribution. See [Docker's WSL 2 setup](https://docs.docker.com/desktop/features/wsl/).
 
+Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/collector/install-shortcut.ps1` to install the single **SCADA Collector - WSL Docker** Start menu shortcut. Open its **Docker deployment** page for Start, Stop and Refresh controls. It also contains local connection setup, source previews and collection/upload pages. Docker settings/queue remain separate from local Windows settings/queue. The installer removes the earlier separate Docker-manager shortcuts. Complete first-time Docker commissioning below before collecting.
+
 ```powershell
 docker info
 docker compose -f deploy/docker-compose.collector.yml config --quiet

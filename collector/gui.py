@@ -35,6 +35,7 @@ class CollectorWindow:
         self.auto_stop = threading.Event()
         self.cycle_stop = threading.Event()
         self.manual_collecting = False
+        self.docker_running = False
         self.collection_status = tk.StringVar(root, 'Collection is stopped. Configure and save settings before starting.')
         self.upload_token = tk.StringVar(root)
         self.upload_credential_status = tk.StringVar(root)
@@ -50,9 +51,15 @@ class CollectorWindow:
         self.after_id = tk.StringVar(root)
         self.include_users = tk.BooleanVar(root, False)
         self.preview_status = tk.StringVar(root, "Test your connection, then load a preview.")
-        self.root.title("SCADA Collector · Linker Enterprise")
-        self.root.geometry("1220x840")
-        self.root.minsize(1040, 740)
+        self.root.title("SCADA Collector - WSL Docker")
+        icon_path = Path(__file__).resolve().parents[1] / 'deploy' / 'collector' / 'collector.ico'
+        if sys.platform == 'win32' and icon_path.is_file():
+            try:
+                self.root.iconbitmap(str(icon_path))
+            except tk.TclError:
+                pass
+        self.root.geometry("1420x900")
+        self.root.minsize(1280, 800)
         self.root.configure(bg="#f3f6fa")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self._styles()
@@ -89,6 +96,8 @@ class CollectorWindow:
         style.configure("TNotebook", background="#f3f6fa", borderwidth=0)
         style.configure("TNotebook.Tab", padding=(22, 12), font=("Segoe UI", 10, "bold"))
         style.map("TNotebook.Tab", background=[("selected", "white")], foreground=[("selected", "#2265d7")])
+        style.layout('Sidebar.TNotebook.Tab', [])
+        style.configure('Sidebar.TNotebook', background='#f4f6fb', borderwidth=0)
         style.configure("Treeview", rowheight=34, background="white", fieldbackground="white", borderwidth=0)
         style.configure("Treeview.Heading", padding=(8, 10), background="#eaf0f7", foreground="#33465e",
                         font=("Segoe UI", 10, "bold"))
@@ -110,20 +119,53 @@ class CollectorWindow:
         self.controls.append((field, "readonly" if values else "normal"))
 
     def _build(self):
-        header = tk.Frame(self.root, bg="#12243c", padx=28, pady=19)
-        header.pack(fill="x")
-        tk.Label(header, text="LINKER  /  SCADA COLLECTOR", bg="#12243c", fg="#a8c9ff",
-                 font=("Segoe UI", 10, "bold")).pack(anchor="w")
-        tk.Label(header, text="Source connection, collection & upload", bg="#12243c", fg="white",
-                 font=("Segoe UI", 21, "bold")).pack(anchor="w", pady=(5, 0))
-        tk.Label(header, text="Set up this PC’s read-only connection and inspect its alarm and event history.",
-                 bg="#12243c", fg="#c7d4e5", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 0))
-        toolbar = ttk.Frame(self.root, padding=(24, 14))
+        shell = ttk.Frame(self.root)
+        shell.pack(fill='both', expand=True)
+        sidebar = tk.Frame(shell, bg='#101c32', width=220, padx=18, pady=28)
+        sidebar.pack(side='left', fill='y')
+        sidebar.pack_propagate(False)
+        tk.Label(sidebar, text='LINKER', bg='#101c32', fg='white',
+                 font=('Segoe UI', 23, 'bold')).pack(anchor='w')
+        tk.Label(sidebar, text='SCADA COLLECTOR', bg='#101c32', fg='#8294b3',
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(4, 34))
+        tk.Label(sidebar, text='WORKSPACE', bg='#101c32', fg='#8397b5',
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(0, 12))
+        self.page_titles = ('Connection & setup', 'Alarm & event preview', 'Collection & upload', 'Docker deployment')
+        self.page_descriptions = (
+            'Configure this PC’s read-only source connection and protected credentials.',
+            'Inspect original source fields and timestamp quality before collecting.',
+            'Manage scheduled collection, server setup and confirmed delivery.',
+            'Start, stop and inspect the Collector Docker service from this app.')
+        self.navigation = []
+        for index, title in enumerate(self.page_titles):
+            button = tk.Button(sidebar, text=title, anchor='w', relief='flat', bd=0,
+                               padx=12, pady=13, bg='#101c32', fg='#a8b8d0',
+                               activebackground='#233a5d', activeforeground='white',
+                               font=('Segoe UI', 10), cursor='hand2',
+                               command=lambda page=index: self._navigate(page))
+            button.pack(fill='x', pady=3)
+            self.navigation.append(button)
+        tk.Label(sidebar, text='READ-ONLY SOURCE\nOutbound HTTPS delivery\nDurable local queue',
+                 justify='left', bg='#101c32', fg='#91a3bf', font=('Segoe UI', 9),
+                 wraplength=180).pack(side='bottom', anchor='w', pady=12)
+        workspace = ttk.Frame(shell)
+        workspace.pack(side='left', fill='both', expand=True)
+        header = ttk.Frame(workspace, padding=(24, 22))
+        header.pack(fill='x')
+        ttk.Label(header, text='COLLECTOR WORKSPACE', foreground='#63758f',
+                  font=('Segoe UI', 9, 'bold')).pack(anchor='w')
+        self.page_title = ttk.Label(header, font=('Segoe UI', 23, 'bold'))
+        self.page_title.pack(anchor='w', pady=(6, 4))
+        self.page_description = ttk.Label(header, foreground='#5f6f86')
+        self.page_description.pack(anchor='w')
+        toolbar = ttk.Frame(workspace, padding=(24, 6))
         toolbar.pack(fill="x")
         ttk.Label(toolbar, textvariable=self.location, foreground="#607086").pack(side="left", fill="x", expand=True)
         self._button(toolbar, "New setup…", self.new_setup).pack(side="right", padx=(8, 0))
         self._button(toolbar, "Open settings…", self.open_settings).pack(side="right")
-        self.notebook = ttk.Notebook(self.root)
+        self.footer = ttk.Frame(workspace, padding=(24, 12))
+        self.footer.pack(side='bottom', fill='x')
+        self.notebook = ttk.Notebook(workspace, style='Sidebar.TNotebook')
         self.notebook.pack(fill="both", expand=True, padx=24)
         connection_tab = ttk.Frame(self.notebook, padding=(0, 16))
         preview_tab = ttk.Frame(self.notebook, padding=(0, 16))
@@ -132,6 +174,23 @@ class CollectorWindow:
         collection_tab = ttk.Frame(self.notebook, padding=(0,16))
         self.notebook.add(collection_tab, text='3   Collection & upload')
         self._build_collection(collection_tab)
+        docker_tab = ttk.Frame(self.notebook, padding=(0, 16))
+        self.notebook.add(docker_tab, text='Docker deployment')
+        docker_card = ttk.Frame(docker_tab, style='Card.TFrame', padding=24)
+        docker_card.pack(fill='both', expand=True)
+        ttk.Label(docker_card, text='Collector Docker service', style='Title.TLabel').pack(anchor='w')
+        ttk.Label(docker_card, text='Keep Docker Desktop running. Stop local automatic collection before starting Docker.\n'
+                  'Docker uses its saved container setup and queue; the other pages show the local Windows setup.\n'
+                  'Closing this window leaves the Docker service running.',
+                  style='Muted.TLabel', wraplength=900).pack(anchor='w', pady=16)
+        self.docker_status = tk.StringVar(self.root, 'Choose Refresh to check the Docker service.')
+        ttk.Label(docker_card, textvariable=self.docker_status, style='Card.TLabel').pack(anchor='w', pady=12)
+        docker_bar = ttk.Frame(docker_card, style='Card.TFrame')
+        docker_bar.pack(fill='x')
+        self.docker_start_button = self._button(docker_bar, 'Start Docker Collector', lambda: self.docker_action('start'), primary=True)
+        self.docker_start_button.pack(side='left', padx=(0, 8))
+        self._button(docker_bar, 'Stop Docker Collector', lambda: self.docker_action('stop')).pack(side='left', padx=8)
+        self._button(docker_bar, 'Refresh', lambda: self.docker_action('status')).pack(side='left', padx=8)
         connection_tab.columnconfigure(0, weight=3)
         connection_tab.columnconfigure(1, weight=2)
         connection_tab.rowconfigure(0, weight=1)
@@ -187,12 +246,33 @@ class CollectorWindow:
                   style="Muted.TLabel", wraplength=350).pack(anchor="w", pady=(16, 0))
 
         self._build_preview(preview_tab)
-        footer = ttk.Frame(self.root, padding=(24, 12))
-        footer.pack(side="bottom", fill="x", before=self.notebook)
+        footer = self.footer
         self.progress = ttk.Progressbar(footer, mode="determinate", length=105)
         self.progress.pack(side="right", padx=(12, 0))
         ttk.Label(footer, text=f"v{__version__}", foreground="#627287").pack(side="right", padx=12)
         ttk.Label(footer, textvariable=self.status, wraplength=860).pack(side="left", fill="x", expand=True)
+        self._navigate(0)
+
+    def _navigate(self, index):
+        self.notebook.select(index)
+        self.page_title.configure(text=self.page_titles[index])
+        self.page_description.configure(text=self.page_descriptions[index])
+        for page, button in enumerate(self.navigation):
+            button.configure(bg='#233a5d' if page == index else '#101c32',
+                             fg='white' if page == index else '#a8b8d0')
+
+    def docker_action(self, action):
+        if self.busy:
+            return
+        if action == 'start' and self.auto_thread and self.auto_thread.is_alive():
+            self.status.set('Stop local automatic collection before starting Docker.')
+            return
+        from deploy.collector.control import DockerControl
+        def shown(result):
+            self.docker_running = result['running']
+            self.docker_status.set('Docker Collector is running.' if self.docker_running else 'Docker Collector is stopped. Pending uploads are preserved.')
+            self.status.set(self.docker_status.get())
+        self._start('Updating Collector Docker service…', lambda: DockerControl().perform(action), shown)
 
     def _build_collection(self, parent):
         card = ttk.Frame(parent, style='Card.TFrame', padding=16)
@@ -267,6 +347,9 @@ class CollectorWindow:
         self.status.set(message)
 
     def collect_now(self):
+        if self.docker_running:
+            self.status.set('Stop the Docker Collector before starting local collection.')
+            return
         if self.busy or self._is_dirty() or self.password.get() or (self.auto_thread and self.auto_thread.is_alive()):
             return
         config = self.saved
@@ -298,7 +381,7 @@ class CollectorWindow:
         if blocker:
             self.status.set(blocker)
             self.collection_status.set(blocker)
-            if self.saved is None:self.notebook.select(0)
+            if self.saved is None:self._navigate(0)
             messagebox.showinfo('Import server setup',blocker,parent=self.root)
             return
         path = filedialog.askopenfilename(parent=self.root, title='Import encrypted Central Server setup',
@@ -327,6 +410,9 @@ class CollectorWindow:
                     lambda result:self._collection_message('Server connection verified: '+result['upload_url']+'. Credential and active source/generation accepted; no records were uploaded.'))
 
     def start_auto(self):
+        if self.docker_running:
+            self.status.set('Stop the Docker Collector before starting local collection.')
+            return
         if self.busy or self._is_dirty() or not self.saved.collection_enabled or (self.auto_thread and self.auto_thread.is_alive()):
             return
         from collector.runtime import run

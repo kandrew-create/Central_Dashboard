@@ -75,6 +75,33 @@ class DesktopWindowTests(unittest.TestCase):
         app.test_connection()
         self.service.check.assert_not_called()
 
+    def test_sidebar_navigation_preserves_edits_and_footer_at_minimum_size(self):
+        app = self.create()
+        self.root.geometry('1280x800')
+        self.root.deiconify()
+        app.variables['host'].set('edited-source.example')
+        for index, button in enumerate(app.navigation):
+            button.invoke()
+            self.root.update()
+            self.assertEqual(app.notebook.index('current'), index)
+            self.assertEqual(app.page_title.cget('text'), app.page_titles[index])
+            self.assertEqual(app.variables['host'].get(), 'edited-source.example')
+            self.assertTrue(app.footer.winfo_ismapped())
+            self.assertLessEqual(app.footer.winfo_y() + app.footer.winfo_height(),
+                                 app.footer.master.winfo_height())
+        self.assertFalse(app.save_button.instate(('disabled',)))
+
+    def test_docker_controls_update_status_and_block_local_collection(self):
+        app = self.create()
+        with patch('deploy.collector.control.DockerControl.perform', return_value={'running': True, 'action': 'status'}) as control:
+            app.docker_action('status')
+            self.wait_idle()
+            control.assert_called_once_with('status')
+        self.assertIn('running', app.docker_status.get())
+        app.collect_now()
+        self.service.cycle.assert_not_called()
+        self.assertIn('Stop the Docker Collector', app.status.get())
+
     def test_connection_and_preview_run_on_a_worker_thread(self):
         app = self.create()
         started, release = threading.Event(), threading.Event()

@@ -10,6 +10,8 @@ For the Linux CLI/scheduler, including Docker Desktop on WSL 2, see [Collector W
 
 Open **Launch Collector.cmd**, or run:
 
+The source-checkout GUI uses the Central Server's dark sidebar, light workspace, page headings and persistent activity/status footer. Choose **Connection & setup**, **Alarm & event preview** or **Collection & upload** in the sidebar. Switching pages preserves unsaved edits. This appearance update is available through the source launcher; published X3 packages retain their earlier appearance. The **Docker deployment** page controls the container service in the same window.
+
 ```powershell
 & .venv/Scripts/python.exe -m collector gui
 ```
@@ -88,3 +90,5 @@ After import, the **Upload credential** entry stays blank because the secret is 
 Completed server checks, credential storage and collection-status refreshes now replace their in-progress footer messages, so a successful action does not continue showing “Testing…” or “Protecting…”.
 
 Version 0.4 supports network destinations exported by Central Server **4 Connection & mode**. **Test server** verifies HTTPS, upload credential and the active source/generation without uploading records or advancing state. Source database testing remains a separate **Test connection** action. Use Local testing for one PC and Network server for collectors on other PCs; setup changes require a fresh local import.
+
+Use the single **SCADA Collector - WSL Docker** Start menu shortcut. Its sidebar includes connection setup, source previews, collection/upload and Docker deployment. Docker uses its own saved container configuration and durable queue; the other pages use the saved local Windows setup. Stop local automatic collection before starting Docker. Starting local collection is blocked after the app observes Docker running. The shortcut installer removes obsolete separate manager shortcuts.
