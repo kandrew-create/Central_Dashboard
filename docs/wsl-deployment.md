@@ -2,13 +2,13 @@
 
 For guided installation without Windows Python, use the separate [WSL / Docker package installer](wsl-installer.md). It prepares prerequisites, a private Linux GUI environment, the Docker server and its shortcut; the manual/development workflow below remains available.
 
-This development deployment runs Central Server 0.6.2 in Linux containers through Docker Desktop's WSL 2 backend. PostgreSQL, the ingestion API, the worker and Caddy HTTPS run in Linux. The Windows Central Server installation and its operational data remain separate. The current WSL deployment uses Network mode with the same endpoint saved by Windows: `https://187.17.53.84:8443/v1/uploads`. The earlier loopback deployment is documented below as installation history.
+This development deployment runs Central Server 0.6.2 in Linux containers through Docker Desktop's WSL 2 backend. PostgreSQL, the ingestion API, the worker and Caddy HTTPS run in Linux. The older Windows application was uninstalled on 2026-11-01; its separate database, settings and credentials were retained, with all 1,436 saved-state files verified unchanged. The current WSL deployment uses Network mode with the same endpoint saved by Windows: `https://187.17.53.84:8443/v1/uploads`. The earlier loopback deployment is documented below as installation history.
 
 The native **Central Server - WSL / Docker** management window uses Qt through WSLg, with smooth fonts, sidebar navigation, an overview of service health and saved-record counts, and clear source/setup actions. It controls this Compose project and supports source registration, encrypted collector setup export, credential replacement, confirmed source deletion and saved identification results. Alarm AI is not configured. Network mode supports multiple collector PCs; each actual remote PC still needs a successful Collector **Test server** check before commissioning is complete. There is no web dashboard. Mapping approval remains an administration CLI operation; see [Linux operations](operations.md#central-linux-deployment).
 
 ## Open and use the GUI
 
-On this PC, double-click **Central Server - WSL Docker** on the Windows desktop. This opens the Linux manager, with a different title from the preserved Windows manager. Keep Docker Desktop running.
+On this PC, double-click **Central Server - WSL Docker** on the Windows desktop. This opens the Linux manager. Keep Docker Desktop running.
 
 From Ubuntu, the equivalent command is:
 
@@ -117,6 +117,8 @@ The exported public CA certificate is:
 ```
 
 Configure that file explicitly in a collector connecting to this server. The private CA key remains in the `linker-scada-wsl_caddy-data` volume. Certificate verification must remain enabled. Caddy's local certificate authority and client trust requirements are explained in the [Caddy guide](https://caddyserver.com/docs/automatic-https#local-https).
+
+The user-authorized [encrypted Collector handoff](../deploy/collector-setups/README.md) includes the saved Network endpoint, the existing WSL source/generation identity and its public CA. Its unlock password remains protected outside Git. Import it on the actual Collector PC and use **Test server**; database/history/schedule settings remain local to that Collector.
 
 The HTTPS root and `/health` return 404 through Caddy: the gateway exposes only POST requests to `/v1/uploads` and `/v1/collector-check`. API health is checked internally by Compose. A browser opening `https://187.17.53.84:8443/` is not a server-management interface.
 
