@@ -131,6 +131,43 @@ class DesktopWindowTests(unittest.TestCase):
         self.assertEqual(app.tree.item("0", "values")[4], "001.20")
         self.service.preview.assert_called_once_with(self.config, "alarmhistory", 20, None, False)
 
+    def test_preview_checks_source_without_requiring_separate_connection_test(self):
+        app = self.create()
+        caller = threading.get_ident()
+        workers = []
+        self.service.check.side_effect = lambda _config: workers.append(threading.get_ident())
+        self.assertFalse(app.preview_button.instate(('disabled',)))
+        app.table_choice.set('Events')
+        app.preview_button.invoke()
+        self.wait_idle()
+        self.service.check.assert_called_once_with(self.config)
+        self.service.preview.assert_called_once_with(self.config, 'eventhistory', 20, None, False)
+        self.assertNotEqual(workers[0], caller)
+        self.assertTrue(app.connected)
+        self.assertEqual(len(app.tree.get_children()), 1)
+
+    def test_preview_does_not_read_records_when_source_check_fails(self):
+        from collector.errors import CollectorError
+        app = self.create()
+        self.service.check.side_effect = CollectorError('Read-only source access is required.')
+        with patch('collector.gui.messagebox.showerror'):
+            app.load_preview()
+            self.wait_idle()
+        self.service.preview.assert_not_called()
+        self.assertFalse(app.connected)
+        self.assertIn('Read-only source access', app.status.get())
+
+    def test_preview_rejects_unsaved_settings_and_unstored_password(self):
+        app = self.create()
+        app.password.set('TEST-ONLY-unstored-password')
+        self.assertTrue(app.preview_button.instate(('disabled',)))
+        app.load_preview()
+        app.password.set('')
+        app.variables['host'].set('edited-source.example')
+        app.load_preview()
+        self.service.check.assert_not_called()
+        self.service.preview.assert_not_called()
+
     def test_connection_edits_clear_records_and_require_another_test(self):
         app = self.create()
         app.connected = True

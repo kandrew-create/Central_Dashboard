@@ -50,7 +50,7 @@ class CollectorWindow:
         self.preview_limit = tk.StringVar(root, "20")
         self.after_id = tk.StringVar(root)
         self.include_users = tk.BooleanVar(root, False)
-        self.preview_status = tk.StringVar(root, "Test your connection, then load a preview.")
+        self.preview_status = tk.StringVar(root, "Load preview verifies read-only database access. Test server checks the upload connection only.")
         self.root.title("SCADA Collector - WSL Docker")
         icon_path = Path(__file__).resolve().parents[1] / 'deploy' / 'collector' / 'collector.ico'
         if sys.platform == 'win32' and icon_path.is_file():
@@ -512,7 +512,7 @@ class CollectorWindow:
         self.password_button.configure(state="normal" if saved and not self.busy else "disabled")
         self.password_entry.configure(state="normal" if saved and not self.busy else "disabled")
         self.test_button.configure(state="normal" if has_password and not self.password.get() and not self.busy else "disabled")
-        self.preview_button.configure(state="normal" if self.connected and saved and not self.busy else "disabled")
+        self.preview_button.configure(state="normal" if has_password and not self.password.get() and not self.busy else "disabled")
         self.details_button.configure(state="normal" if self.records and not self.busy else "disabled")
         self.save_button.configure(state="normal" if not self.busy and self._is_dirty() else "disabled")
         running = self.auto_thread is not None and self.auto_thread.is_alive()
@@ -738,7 +738,7 @@ class CollectorWindow:
         self._start("Testing database connection and table permissions…", lambda: self.service.check(config), checked)
 
     def load_preview(self):
-        if self.busy or self._is_dirty() or not self.connected:
+        if self.busy or self._is_dirty() or self.password.get() or not self.saved.password_path.is_file():
             return
         try:
             limit = int(self.preview_limit.get())
@@ -752,9 +752,12 @@ class CollectorWindow:
             return
         table = "alarmhistory" if self.table_choice.get() == "Alarms" else "eventhistory"
         include = self.include_users.get()
+        needs_check = not self.connected
         self._clear_preview()
 
         def previewed(records):
+            self.connected = True
+            self.connection_status.set("Connected · read-only\nBoth approved tables verified")
             self.records = records
             for index, record in enumerate(records):
                 self.tree.insert("", "end", iid=str(index), values=table_values(record), tags=("even",) if index % 2 == 0 else ())
@@ -762,8 +765,13 @@ class CollectorWindow:
             self.preview_status.set(f"{len(records)} record(s) loaded from {table}. {privacy}")
             self.status.set("Preview loaded. Select a row and choose View selected record for all preserved fields.")
 
-        self._start("Reading a limited sample from the source…",
-                    lambda: self.service.preview(config, table, limit, after, include), previewed)
+        def read_preview():
+            if needs_check:
+                self.service.check(config)
+            return self.service.preview(config, table, limit, after, include)
+
+        self._start("Checking read-only access and reading a limited sample from the source…",
+                    read_preview, previewed)
 
     def view_details(self):
         selected = self.tree.selection()
@@ -812,6 +820,10 @@ class CollectorWindow:
 
 
 def launch(config_path):
+    if sys.platform == 'win32':
+        import ctypes
+        # Match the Start menu shortcut rather than the shared Python host.
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Linker.SCADA.Collector')
     try:
         root = tk.Tk()
     except tk.TclError:

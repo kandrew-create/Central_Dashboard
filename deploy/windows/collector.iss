@@ -14,6 +14,7 @@ OutputBaseFilename=Linker-SCADA-Collector-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\collector\collector.ico
 CloseApplications=yes
 UninstallDisplayIcon={app}\collector-gui.exe
 [Files]
