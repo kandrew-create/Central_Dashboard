@@ -1,5 +1,7 @@
 from pathlib import Path
+from dataclasses import replace
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import Mock, patch
@@ -47,6 +49,8 @@ class DockerManagerWindowTests(unittest.TestCase):
         self.assertFalse(self.app.busy)
 
     def test_start_uses_docker_service_and_never_starts_native_scheduler(self):
+        self.app.saved = self.app.base = replace(self.config, collection_enabled=True, all_history=True)
+        self.app._populate(self.app.saved)
         with patch('collector.runtime.run') as native:
             self.app.start_auto()
             self.wait_idle()
@@ -72,3 +76,66 @@ class DockerManagerWindowTests(unittest.TestCase):
         self.assertFalse(self.config.password_path.exists())
         self.assertFalse(self.app.preview_button.instate(('disabled',)))
         self.assertIn('Docker:', self.app.location.get())
+
+    def test_import_accepts_unsaved_fields_supplied_by_server_setup(self):
+        self.app.variables['upload_enabled'].set('True')
+        self.app.variables['upload_url'].set('')
+        self.app.variables['source_id'].set('unsaved-source')
+        self.app.variables['generation_id'].set('unsaved-generation')
+        self.app.variables['upload_ca_file'].set('unsaved-ca.pem')
+        self.assertFalse(self.app.import_button.instate(('disabled',)))
+        self.service.import_setup.return_value = self.config
+        with patch('collector.gui.filedialog.askopenfilename', return_value='selected.linker-collector'), patch(
+                'collector.gui.simpledialog.askstring', return_value='TEST-ONLY-unlock'):
+            self.app.import_button.invoke()
+            self.wait_idle()
+        self.service.import_setup.assert_called_once_with(self.config, 'selected.linker-collector', 'TEST-ONLY-unlock')
+
+    def test_import_reports_unsaved_local_settings_and_never_discards_them(self):
+        self.app.variables['host'].set('edited-source.example')
+        with patch('collector.gui.messagebox.showinfo') as info, patch('collector.gui.filedialog.askopenfilename') as choose:
+            self.app.import_button.invoke()
+        info.assert_called_once()
+        choose.assert_not_called()
+        self.service.import_setup.assert_not_called()
+        self.assertEqual(self.app.variables['host'].get(), 'edited-source.example')
+
+    def test_import_is_blocked_while_docker_scheduler_is_running(self):
+        self.app.docker_running = True
+        with patch('collector.gui.filedialog.askopenfilename', return_value='') as choose:
+            self.app.import_server_setup()
+        choose.assert_not_called()
+        self.service.import_setup.assert_not_called()
+
+    def test_both_start_buttons_require_saved_enabled_collection(self):
+        self.assertTrue(self.app.auto_button.instate(('disabled',)))
+        self.assertTrue(self.app.docker_start_button.instate(('disabled',)))
+        self.app.docker_action('start')
+        self.service.start.assert_not_called()
+        self.app.saved = self.app.base = replace(self.config, collection_enabled=True, all_history=True)
+        self.app._populate(self.app.saved)
+        self.app._refresh_actions()
+        self.assertFalse(self.app.auto_button.instate(('disabled',)))
+        self.assertFalse(self.app.docker_start_button.instate(('disabled',)))
+        self.app.variables['host'].set('edited-source.example')
+        self.assertTrue(self.app.auto_button.instate(('disabled',)))
+        self.assertTrue(self.app.docker_start_button.instate(('disabled',)))
+        self.app.docker_action('start')
+        self.service.start.assert_not_called()
+
+    def test_manual_stop_signals_cancellation_and_disables_repeat_stop(self):
+        started, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        def collect(_config, stop):
+            started.set()
+            release.wait(2)
+            return dict(running=False, engine_ready=True, pending_batches=1)
+        self.service.cycle.side_effect = collect
+        self.app.collect_now()
+        self.assertTrue(started.wait(1))
+        self.app.stop_auto()
+        self.assertTrue(self.app.cycle_stop.is_set())
+        self.assertTrue(self.app.stop_button.instate(('disabled',)))
+        self.service.stop.assert_not_called()
+        release.set()
+        self.wait_idle()

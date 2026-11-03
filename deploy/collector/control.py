@@ -4,6 +4,7 @@ from contextlib import ExitStack
 import os
 from pathlib import Path
 import subprocess
+import sys
 import threading
 import time
 from uuid import uuid4
@@ -13,7 +14,9 @@ from collector.errors import CollectorError
 
 class DockerControl:
     def __init__(self, native_config=None):
-        self.workspace = Path(__file__).resolve().parents[2]
+        self.frozen = bool(getattr(sys, 'frozen', False))
+        self.workspace = (Path(sys._MEIPASS) / 'collector-docker-context'
+                          if self.frozen else Path(__file__).resolve().parents[2])
         self.compose = self.workspace / 'deploy/docker-compose.collector.yml'
         self.native_config = native_config
 
@@ -23,6 +26,11 @@ class DockerControl:
             environment = {key: value for key, value in os.environ.items()
                            if key not in {'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH'}
                            and not key.startswith('COMPOSE_')}
+            if self.frozen:
+                # A running Collector must not bind-mount the onefile extraction
+                # directory, which disappears when its manager closes.
+                local = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / '.local/share')))
+                environment['COLLECTOR_HANDOFF_DIR'] = str(local / 'Linker/Collector/handoff')
             return subprocess.run(
                 ['docker', '--host', host, *arguments],
                 cwd=self.workspace, capture_output=True, text=True,
@@ -122,7 +130,7 @@ class DockerControl:
             try:
                 ready, message = self._engine()
             except CollectorError as error:
-                if action != 'stop':
+                if action == 'start':
                     raise
                 ready, message = False, str(error)
             if not ready:

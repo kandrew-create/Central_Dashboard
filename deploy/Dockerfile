@@ -29,4 +29,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends postgresql-clie
     && pip install --no-cache-dir '.[test,local]'
 COPY tests ./tests
 COPY deploy ./deploy
+COPY .dockerignore ./
+USER 10001:10001
 CMD ["pytest", "-q"]

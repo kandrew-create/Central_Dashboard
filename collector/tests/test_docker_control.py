@@ -51,6 +51,16 @@ class DockerControlTests(unittest.TestCase):
         self.assertFalse(status['stop_confirmed'])
         self.assertFalse(status['engine_ready'])
 
+    def test_status_reports_missing_inaccessible_or_timed_out_engine_without_raising(self):
+        for error in (FileNotFoundError(), PermissionError(), subprocess.TimeoutExpired('docker', 30)):
+            with self.subTest(error=type(error).__name__), patch(
+                    'deploy.collector.control.subprocess.run', side_effect=error) as run:
+                status = DockerControl().perform('status')
+            self.assertFalse(status['engine_ready'])
+            self.assertFalse(status['running'])
+            self.assertTrue(status['message'])
+            self.assertEqual(run.call_count, 1)
+
     def test_actual_stop_failure_is_still_reported_when_engine_is_ready(self):
         with patch('deploy.collector.control.subprocess.run', side_effect=[
                 result(stdout='linux\n'), result(1, stderr='stop failed')]):

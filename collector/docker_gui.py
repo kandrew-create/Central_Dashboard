@@ -34,11 +34,14 @@ class DockerCollectorWindow(CollectorWindow):
         super()._refresh_actions()
         ready = self.docker_engine_ready is not False
         saved = not self._is_dirty()
-        self.auto_button.configure(state='normal' if ready and saved and self.saved.collection_enabled and not self.busy and not self.docker_running else 'disabled')
-        self.docker_start_button.configure(state='normal' if ready and not self.busy and not self.docker_running else 'disabled')
+        can_start = ready and saved and self.saved.collection_enabled and not self.password.get() and not self.upload_token.get() and not self.busy and not self.docker_running
+        self.auto_button.configure(state='normal' if can_start else 'disabled')
+        self.docker_start_button.configure(state='normal' if can_start else 'disabled')
         self.collect_button.configure(state='normal' if ready and saved and self.saved.collection_enabled and not self.password.get() and not self.busy and not self.docker_running else 'disabled')
         self.stop_button.configure(state='normal' if not self.busy and self.docker_running or self.manual_collecting and not self.cycle_stop.is_set() else 'disabled')
-        self.import_button.configure(state='normal' if saved and not self.busy and not self.docker_running else 'disabled')
+        self.import_button.configure(state='normal' if not self.busy and not self.docker_running else 'disabled')
+        if self.docker_running:
+            self.setup_import_status.set('Stop the Docker Collector before importing server setup.')
 
     def _show_collection_status(self, result):
         self.docker_running = result.get('running', self.docker_running)
@@ -59,6 +62,11 @@ class DockerCollectorWindow(CollectorWindow):
     def docker_action(self, action):
         if self.busy:
             return
+        if action == 'start' and (self._is_dirty() or not self.saved.collection_enabled
+                                  or self.password.get() or self.upload_token.get()
+                                  or self.docker_running or self.docker_engine_ready is False):
+            self.status.set('Save settings, enable collection and store entered credentials before starting the Docker Collector.')
+            return
         work = {'start': self.service.start, 'stop': self.service.stop,
                 'status': lambda: self.service.status(self.saved)}[action]
         self._start('Updating Docker Collector…', work, self._show_collection_status)
@@ -71,8 +79,15 @@ class DockerCollectorWindow(CollectorWindow):
         if self.manual_collecting:
             self.cycle_stop.set()
             self._collection_message('Stopping the current Docker collection operation; pending uploads are preserved.')
+            self._refresh_actions()
         else:
             self.docker_action('stop')
+
+    def import_server_setup(self):
+        if self.docker_running:
+            self._collection_message('Stop the Docker Collector before importing server setup.')
+            return
+        super().import_server_setup()
 
     def collect_now(self):
         if self.busy or self.docker_running or self._is_dirty() or self.password.get():

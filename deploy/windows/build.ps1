@@ -4,12 +4,17 @@ $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Pat
 Push-Location -LiteralPath $projectRoot
 try {
     $pythonExe = Join-Path $projectRoot '.venv\Scripts\python.exe'
+    $collectorIcon = Join-Path $projectRoot 'deploy\collector\collector.ico'
+    $dockerContext = Join-Path $projectRoot ('build\collector-docker-context-' + [guid]::NewGuid().ToString('N'))
+    & $pythonExe -m deploy.collector.build_context --output $dockerContext
+    if ($LASTEXITCODE -ne 0) { throw 'Collector Docker context staging failed.' }
     $entries = @(@('collector','cli_entry.py'),@('collector-gui','gui_entry.py'),@('collector-service','service_entry.py'),@('collector-admin','admin_entry.py'))
     foreach ($entry in $entries) {
         $buildArgs = @('-m','PyInstaller','--noconfirm','--onefile','--name',$entry[0],'--distpath','dist\collector','--workpath',('build\'+$entry[0]),'--specpath','build','--collect-all','tzdata','--hidden-import','win32timezone','--hidden-import','win32crypt','--hidden-import','win32security','--hidden-import','servicemanager')
-        $buildArgs += @('--icon', 'deploy\collector\collector.ico')
-        if ($entry[0] -eq 'collector-gui') {
-            $buildArgs += @('--add-data', 'deploy\collector\collector.ico;deploy\collector')
+        $buildArgs += @('--icon', $collectorIcon)
+        if ($entry[0] -in @('collector','collector-gui')) {
+            $buildArgs += @('--add-data', ($collectorIcon+';deploy\collector'))
+            $buildArgs += @('--add-data', ($dockerContext+';collector-docker-context'))
         }
         if ($entry[0] -in @('collector-gui','collector-service')) { $buildArgs += '--noconsole' }
         $buildArgs += Join-Path 'deploy\windows' $entry[1]

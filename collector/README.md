@@ -88,6 +88,9 @@ Old pending batches retain their original generation and bytes. The central serv
 
 ## Development verification
 
+See the [3 November 2026 Collector QA review](../docs/collector-qa-2026-11-03.md)
+for feature coverage, corrected Docker controls and remaining commissioning gates.
+
 ```powershell
 uv pip install --python .venv/Scripts/python.exe -e '.[collector,server,test,local,build]'
 & .venv/Scripts/python.exe -m pytest -q

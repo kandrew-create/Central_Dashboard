@@ -738,7 +738,8 @@ class CollectorWindow:
         def stored(_result):
             self.connected = False
             self._clear_preview()
-            self.password_status.set("Password protected for this Windows account")
+            self.password_status.set("Password protected with the Collector's private Docker key" if self.docker_managed
+                                     else "Password protected for this Windows account")
             self.connection_status.set("Not tested")
             self.status.set("Password stored securely. Test the connection next.")
 

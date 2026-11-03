@@ -6,6 +6,17 @@ The Collector can run its CLI and scheduler on Linux, including Docker Desktop's
 
 The Docker Collector runs as UID/GID 10001, opens no network listener, and retains settings, checkpoints, logs and unconfirmed uploads in a named volume. A second named volume holds its encryption key and is mounted read-only during normal operation. Windows credentials continue to use current-user DPAPI; Linux credentials use authenticated Fernet encryption and private file permissions. Copying Windows DPAPI files into a Linux container will not unlock them.
 
+The Collector Compose services use Docker init forwarding so Stop also reaches a
+process still starting Python. The separate `test` image includes packaging inputs
+and runs as UID/GID 10001; use it with an explicitly disposable PostgreSQL cluster.
+See the [Collector QA review](collector-qa-2026-11-03.md) for verification and limits.
+
+Future Windows GUI and CLI builds bundle an allowlisted Docker build context and
+both Collector Compose files, including support for the CLI's `gui` command. Their handoff mount uses
+`%LOCALAPPDATA%\Linker\Collector\handoff`, which remains available after the onefile
+manager closes. The source checkout keeps its existing `collector-handoff/` path.
+Building this GUI does not initialize Docker volumes or publish a new installer.
+
 ## Prepare this Collector PC
 
 Start Docker Desktop, enable its WSL 2 engine and select Linux containers. Commands below run from the repository root in PowerShell or an integrated WSL distribution. Docker Desktop also supports these Docker commands from Windows without installing an additional Linux distribution. See [Docker's WSL 2 setup](https://docs.docker.com/desktop/features/wsl/).
