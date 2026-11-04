@@ -1,0 +1,12 @@
+{
+  "ubuntu": {
+    "version": "24.04",
+    "build": "20261017",
+    "url": "https://cloud-images.ubuntu.com/releases/noble/release-20261017/ubuntu-24.04-server-cloudimg-amd64.img",
+    "sha256": "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94"
+  },
+  "tools_image": "linker-vmware-tools:24.04",
+  "memory_mb": 8192,
+  "cpus": 4,
+  "disk_gb": 80
+}

@@ -27,6 +27,8 @@ The updated WSL/Docker manager adds [alarm analysis and warehouse views](docs/ce
 
 For development on Windows with WSL 2 and Docker Desktop, a native Linux management window now provides server controls, source registration and encrypted collector setup export. See [WSL / Docker setup and usage](docs/wsl-deployment.md). This deployment remains separate from the Windows installation.
 
+A separate [VMware Linux desktop bundle](docs/vmware-linux.md) builds Ubuntu 24.04 with Xfce and provisions Docker Engine plus the Central Server manager inside the guest. It uses a fresh isolated server and leaves the Collector on its separate PC. Its first boot requires network access; the existing Windows/WSL data is not migrated by building this VM.
+
 A separate [WSL / Docker online package installer](docs/wsl-installer.md) prepares prerequisites, private Python/Qt, the server and its GUI shortcut. Build with `deploy/wsl/build-installer.ps1`; outputs and checksums go into a fresh `dist/wsl-docker/0.6.2-*` directory. Existing Windows installers are retained.
 
 The Collector CLI/scheduler also supports Linux and Docker Desktop on WSL 2. See [Collector WSL/Docker setup](docs/collector-wsl-docker.md) for its separate Compose deployment, protected credentials and Network-mode commissioning.

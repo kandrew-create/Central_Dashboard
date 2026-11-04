@@ -35,6 +35,8 @@ The source checkout also provides a native **WSL / Docker management GUI** throu
 
 The separate [WSL / Docker online installer](../docs/wsl-installer.md) prepares this deployment and GUI without Windows Python. Build it with `deploy/wsl/build-installer.ps1`; it retains earlier Windows packages and existing Linux settings/data when rerun.
 
+The [VMware Linux desktop build](../docs/vmware-linux.md) provides a separate Ubuntu/Xfce VM with Docker Engine and the same management window. The guest is a fresh Central Server environment; current data, registrations and Collector identities require a separate reviewed migration if they are to be continued there.
+
 The current source checkout adds **Delete selected source** under **Sources & collector setup**. After confirmation it removes a registration from use, revokes its upload credentials and retains received history and audit records. It works in both operating modes; use a newly rebuilt package for this button because the published X2 installer predates it. See [source deletion](../docs/central-server-windows.md#delete-a-registered-source) for retained data and collector queue behavior.
 
 ## Source layout

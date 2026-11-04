@@ -17,6 +17,7 @@ from collector.errors import CollectorError
 from server import __version__
 from server.management.docker import DockerManagerService
 from server.management.docker_theme import STYLESHEET, icon
+from server.management.desktop_identity import runtime_caption
 from server.management.service import text
 
 
@@ -24,7 +25,7 @@ PAGES = (
     ('Overview', 'Server health, activity and quick actions.', 'overview'),
     ('Register source', 'Connect a SCADA database source to this server.', 'register'),
     ('Sources & setup', 'Manage registrations and export collector setup files.', 'sources'),
-    ('Deployment', 'Your WSL workspace and Docker server connection.', 'deployment'),
+    ('Deployment', 'Your Linux workspace and Docker server connection.', 'deployment'),
     ('Equipment identification', 'Review saved results alongside the original message.', 'identification'),
     ('Alarm analysis', 'Recurring alarms, daily trends and equipment evidence.', 'overview'),
 )
@@ -149,7 +150,8 @@ class DockerManagerWindow(QMainWindow):
         self.source_rows = []
         self.ai_rows = []
         self.status = {}
-        self.setWindowTitle('Central Server - WSL / Docker')
+        self.runtime_caption = runtime_caption()
+        self.setWindowTitle('Central Server - '+self.runtime_caption)
         self.setWindowIcon(application_icon())
         self.resize(1320, 860)
         self.setMinimumSize(1100, 740)
@@ -219,7 +221,7 @@ class DockerManagerWindow(QMainWindow):
         side.addSpacing(13)
         self.sidebar_environment = label('NETWORK SERVER' if self.service.settings.mode == 'network' else 'LOCAL ENVIRONMENT', 'sidebarCaption')
         side.addWidget(self.sidebar_environment)
-        side.addWidget(label('WSL 2  /  Docker', 'sidebarNote'))
+        side.addWidget(label(self.runtime_caption, 'sidebarNote'))
         self.sidebar_status = label('Checking server…', 'sidebarNote')
         side.addWidget(self.sidebar_status)
         side.addSpacing(15)
@@ -241,7 +243,7 @@ class DockerManagerWindow(QMainWindow):
         titles.addWidget(self.page_title)
         titles.addWidget(self.page_subtitle)
         top.addLayout(titles, 1)
-        environment = label(('NETWORK' if self.service.settings.mode == 'network' else 'LOCAL') + '  ·  WSL / DOCKER', 'pill')
+        environment = label(('NETWORK' if self.service.settings.mode == 'network' else 'LOCAL') + '  ·  '+self.runtime_caption.upper(), 'pill')
         self.environment_badge = environment
         top.addWidget(environment, 0, Qt.AlignmentFlag.AlignTop)
         content.addWidget(heading)
@@ -740,7 +742,7 @@ class DockerManagerWindow(QMainWindow):
             self.saved_deployment_labels['HTTPS listen address'].setText(self.service.settings.listen_address)
         self.deployment_badge.setText('NETWORK DEPLOYMENT' if network else 'LOCAL DEPLOYMENT')
         self.sidebar_environment.setText('NETWORK SERVER' if network else 'LOCAL ENVIRONMENT')
-        self.environment_badge.setText(('NETWORK' if network else 'LOCAL') + '  ·  WSL / DOCKER')
+        self.environment_badge.setText(('NETWORK' if network else 'LOCAL') + '  ·  '+self.runtime_caption.upper())
 
     def _update_deployment_preview(self):
         self.deployment_preview.setText('Collector connection will be included in encrypted setup exports after saving.')
@@ -1185,7 +1187,7 @@ class DockerManagerWindow(QMainWindow):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Modern WSL / Docker Central Server manager')
+    parser = argparse.ArgumentParser(description='Linux / Docker Central Server manager')
     parser.add_argument('--workspace', type=Path, default=Path.home() / 'central-server')
     parser.add_argument('--project', default='linker-scada-wsl')
     args = parser.parse_args(argv)
@@ -1198,7 +1200,7 @@ def main(argv=None):
     try:
         service = DockerManagerService(args.workspace, args.project)
     except (CollectorError, OSError, ValueError):
-        QMessageBox.critical(None, 'Central Server - WSL / Docker', 'Cannot open this workspace. Check its private .env, saved connection mode/address and WSL Compose files.')
+        QMessageBox.critical(None, 'Central Server - '+runtime_caption(), 'Cannot open this workspace. Check its private .env, saved connection mode/address and Compose files.')
         return 1
     window = DockerManagerWindow(service, auto_start=True)
     from server.management.desktop_identity import install_desktop_entry
