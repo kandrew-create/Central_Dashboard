@@ -17,13 +17,15 @@ both Collector Compose files, including support for the CLI's `gui` command. The
 manager closes. The source checkout keeps its existing `collector-handoff/` path.
 Building this GUI does not initialize Docker volumes or publish a new installer.
 
+The local 0.4.1 build uses the independent `deploy/collector/Dockerfile` and Collector-only requirements; its context excludes Central Server, migrations and Ollama. Follow the [separate installer guide](collector-installation.md) on the actual Collector PC. Fresh build artifacts use versioned subfolders under `dist/collector` and `dist/installer/collector`, preserving previous releases and Central Server packages.
+
 ## Prepare this Collector PC
 
 Start Docker Desktop, enable its WSL 2 engine and select Linux containers. Commands below run from the repository root in PowerShell or an integrated WSL distribution. Docker Desktop also supports these Docker commands from Windows without installing an additional Linux distribution. See [Docker's WSL 2 setup](https://docs.docker.com/desktop/features/wsl/).
 
 Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/collector/install-shortcut.ps1` to install the single **SCADA Collector - WSL Docker** Start menu shortcut. Its setup, source previews, credentials, collection/upload and Docker status pages all manage the same container configuration and volumes. **Start Collector** starts its schedule; **Stop Collector** stops it normally; closing the GUI leaves the container running. No native Windows/tray scheduler is started. The installer removes the earlier separate manager shortcuts. Complete first-time Docker commissioning below before collecting.
 
-Open Docker Desktop and wait for its Linux engine before using the manager. Refresh reports an unavailable engine as status rather than a generic alarm. Stop with an unavailable engine reports that no stop command was sent and cannot claim a confirmed stop. Start/Stop remain disabled after an unavailable-engine result until Refresh finds the engine ready. Actual container-stop failures still report errors. Raw Docker output is private. The local management helper runs one request from stdin with logging disabled and no administration port; source reads stay read-only. Reopening settings detects edits made by another manager before further actions.
+The updated Windows manager starts an installed Docker Desktop if necessary and resumes an existing enabled Collector only after checking its setup and stored credentials. It never creates replacement data/key volumes on open. Complete the fresh initialization steps below first on a new PC. Refresh still reports an unavailable engine without starting it. Stop with an unavailable engine reports that no stop command was sent and cannot claim a confirmed stop. Actual stop failures remain errors and native Docker output stays private. Management uses stdin with logging disabled and no administration port; source reads stay read-only. Reopening settings detects external edits.
 
 Management commands pin the local Docker Desktop Linux named pipe on Windows (the local Unix socket on Linux) and project `linker-collector`. Inherited Docker/Compose routing overrides cannot redirect credentials or select different operational volumes. Local routing regression checks passed on both Windows and Linux.
 

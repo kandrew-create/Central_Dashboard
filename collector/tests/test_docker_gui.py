@@ -16,6 +16,49 @@ from deploy.collector.desktop import DockerDesktopService
 
 @unittest.skipIf(tk is None, 'Tk is not installed')
 class DockerManagerWindowTests(unittest.TestCase):
+    def test_schedule_hides_interval_and_retains_its_value(self):
+        self.app.variables['interval_seconds'].set('180')
+        for mode in ('daily', 'weekly'):
+            self.app.variables['schedule_mode'].set(mode)
+            for widget in self.app.fields['interval_seconds']:
+                self.assertFalse(widget.grid_info())
+            self.assertEqual(self.app.variables['interval_seconds'].get(), '180')
+        self.app.variables['schedule_mode'].set('interval')
+        self.assertTrue(all(widget.grid_info() for widget in self.app.fields['interval_seconds']))
+        self.assertFalse(any(widget.grid_info() for widget in self.app.fields['schedule_time']))
+        self.app.variables['schedule_mode'].set('weekly')
+        self.assertTrue(all(widget.grid_info() for widget in self.app.fields['schedule_weekday']))
+
+    def test_url_has_no_visible_editor_and_test_server_does_not_echo_it(self):
+        self.assertNotIn('upload_url', self.app.fields)
+        self.app.saved = self.app.base = replace(self.config, upload_url='https://private-central.example/v1/uploads')
+        self.app._populate(self.app.saved)
+        self.service.check_upload.return_value = dict(upload_url=self.app.saved.upload_url)
+        self.app.test_server()
+        self.wait_idle()
+        self.assertNotIn(self.app.saved.upload_url, self.app.collection_status.get())
+        self.assertNotIn(self.app.saved.upload_url, self.app.status.get())
+        self.assertEqual(self.app.variables['upload_url'].get(), self.app.saved.upload_url)
+        self.assertEqual(self.app.upload_token.get(), '')
+
+    def test_app_startup_runs_off_tk_thread_without_native_collection(self):
+        self.app._destroy()
+        self.root = tk.Tk()
+        self.root.withdraw()
+        calls = []
+        gui_thread = threading.get_ident()
+        self.service.startup.side_effect = lambda path: calls.append(threading.get_ident()) or dict(
+            config=self.config, status=dict(running=False, engine_ready=True), message='Setup retained')
+        from collector.docker_gui import DockerCollectorWindow
+        with patch('collector.runtime.run') as native:
+            self.app = DockerCollectorWindow(self.root, self.config.path, self.service, auto_start=True)
+            self.root.update()
+            self.wait_idle()
+        self.service.startup.assert_called_once()
+        self.assertNotEqual(calls[0], gui_thread)
+        native.assert_not_called()
+        self.assertIsNone(self.app.auto_thread)
+
     def setUp(self):
         try:
             self.root = tk.Tk()

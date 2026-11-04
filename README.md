@@ -4,6 +4,8 @@ Published revision: **X3** — Central Server **0.6.1** and SCADA Collector **0.
 
 The local 0.6.2 update automatically loads saved AI settings and interpretations when opening the manager or its **Equipment Identification** tab (called **Local AI** in earlier builds). AI runs on the central PC and can identify uploaded records from multiple collector PCs. It preserves the enabled/disabled choice. See [AI display fix](docs/ai-display-refresh.md); published X3 downloads remain 0.6.1.
 
+The separate local Collector **0.4.1** build adds a Collector-only Docker package, automatic startup of commissioned setups, a hidden upload URL and schedule-specific controls. Install it on the designated Collector PC using the [safe installation guide](docs/collector-installation.md). The Collector is kept stopped on this Central development PC; published X3 downloads remain unchanged.
+
 Download Windows packages and matching SHA-256 checksum files from the [X3 release](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X3). Earlier [X2 packages](https://github.com/kandrew-create/Central_Dashboard/releases/tag/X2) remain available. See the [X3 release notes](docs/release-X3.md) for setup and verification evidence.
 
 This repository contains two applications with separate Windows installers:

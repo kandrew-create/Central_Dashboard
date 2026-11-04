@@ -2,9 +2,10 @@
 import base64
 from pathlib import Path
 
-from collector.config import parse_config
+from collector.config import load_config, parse_config
 from collector.desktop import config_document
 from deploy.collector.control import DockerControl
+from collector.errors import CollectorError
 
 
 class DockerDesktopService:
@@ -27,7 +28,32 @@ class DockerDesktopService:
         return self.control.rpc(action, args, stop=stop)
 
     def load(self, path):
+        self.control.require_existing_setup()
         return self._settings(self.control.rpc('load'))
+
+    def _check_native_profile(self):
+        if self.path.is_file() and not (self.path.parent / 'docker-runtime.json').is_file():
+            native = load_config(self.path)
+            if native.state_path.is_file():
+                raise CollectorError('An existing native Windows Collector profile needs a reviewed migration before Docker '
+                                     'can start. Stop its scheduler and preserve its queue, IDs and credentials; no state was changed.')
+
+    def startup(self, path):
+        self._check_native_profile()
+        self.control.ensure_engine()
+        config = self.load(path)
+        status = self.control.perform('status')
+        ready = (config.collection_enabled and bool(config.source_id) and bool(config.generation_id)
+                 and self.credential_present(config, 'database')
+                 and (not config.upload_enabled or self.credential_present(config, 'upload')))
+        if status['engine_ready'] and not status['running'] and ready:
+            status = self.start()
+        if status['running']:
+            message = 'Docker Collector is running with its saved setup. Closing this window leaves it running.'
+        else:
+            message = (status.get('message') if not status['engine_ready'] else
+                       'Docker is ready. Complete and save the local setup, store credentials and enable collection before starting.')
+        return dict(config=config, status=status, message=message)
 
     def save(self, config, previous=None):
         return self._settings(self.control.rpc('save', dict(document=config_document(config),
@@ -63,6 +89,8 @@ class DockerDesktopService:
         return self._request('collect', config, stop=stop)
 
     def start(self):
+        self._check_native_profile()
+        self.control.require_existing_setup()
         self.control.perform('start')
         return self.status(None)
 

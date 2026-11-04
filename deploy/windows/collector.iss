@@ -1,4 +1,12 @@
-#define AppVersion "0.4.0"
+#ifndef AppVersion
+  #define AppVersion "0.4.1"
+#endif
+#ifndef CollectorSource
+  #define CollectorSource "..\..\dist\collector"
+#endif
+#ifndef PackageOutput
+  #define PackageOutput "..\..\dist\installer"
+#endif
 [Setup]
 AppId={{C909F5ED-5147-4E05-9566-2E1D63576B16}
 AppName=Linker SCADA Collector
@@ -9,7 +17,7 @@ DefaultGroupName=Linker SCADA Collector
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-OutputDir=..\..\dist\installer
+OutputDir={#PackageOutput}
 OutputBaseFilename=Linker-SCADA-Collector-Setup
 Compression=lzma2
 SolidCompression=yes
@@ -18,8 +26,9 @@ SetupIconFile=..\collector\collector.ico
 CloseApplications=yes
 UninstallDisplayIcon={app}\collector-gui.exe
 [Files]
-Source: "..\..\dist\collector\*.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CollectorSource}\*.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\collector\config.example.toml"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\docs\collector-installation.md"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{group}\Collector"; Filename: "{app}\collector-gui.exe"; Parameters: "--config ""{commonappdata}\Linker\Collector\config.toml"""; WorkingDir: "{app}"
 [UninstallRun]

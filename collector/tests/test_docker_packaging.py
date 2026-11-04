@@ -18,16 +18,18 @@ class DockerPackagingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / 'context'
             self.assertGreater(stage(ROOT, output), 0)
-            for name in ('pyproject.toml', 'alembic.ini', '.dockerignore', 'deploy/Dockerfile',
-                         'deploy/requirements.lock', 'deploy/docker-compose.collector.yml',
+            for name in ('.dockerignore', 'deploy/collector/Dockerfile',
+                         'deploy/collector/requirements.lock', 'deploy/docker-compose.collector.yml',
                          'deploy/docker-compose.collector.host.yml', 'collector/docker_agent.py',
-                         'collector/config.example.toml', 'shared/protocol.py',
-                         'server/migrations/sql/0001_foundation.sql'):
+                         'collector/config.example.toml', 'shared/protocol.py'):
                 self.assertEqual((output / name).read_bytes(), (ROOT / name).read_bytes())
             for path in output.rglob('*'):
                 self.assertFalse({'tests', '__pycache__', '.tools', 'secrets', 'collector-local'}.intersection(path.parts))
                 self.assertNotIn(path.suffix, {'.dpapi', '.fernet', '.key', '.sqlite3', '.linker-collector', '.log'})
                 self.assertNotEqual(path.name, '.env')
+            self.assertFalse((output / 'server').exists())
+            self.assertFalse((output / 'deploy/docker-compose.yml').exists())
+            self.assertNotIn('fastapi', (output / 'deploy/collector/requirements.lock').read_text().lower())
             with self.assertRaisesRegex(ValueError, 'empty output'):
                 stage(ROOT, output)
 

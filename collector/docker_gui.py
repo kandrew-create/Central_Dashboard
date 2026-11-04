@@ -8,15 +8,28 @@ from deploy.collector.desktop import DockerDesktopService
 
 
 class DockerCollectorWindow(CollectorWindow):
-    def __init__(self, root, config_path, service=None):
-        super().__init__(root, config_path, service or DockerDesktopService(config_path))
-        if not self.busy and self.saved is None:
+    def __init__(self, root, config_path, service=None, auto_start=False):
+        super().__init__(root, config_path, service or DockerDesktopService(config_path), load_on_open=not auto_start)
+        if not auto_start and not self.busy and self.saved is None:
             self._load(self.config_path)
         self.root.title('SCADA Collector - Docker')
         self.auto_button.configure(text='Start Collector')
         self.stop_button.configure(text='Stop Collector')
         self._refresh_actions()
         self.status_poll = self.root.after(1000, self._initial_status)
+        if auto_start:
+            self.startup_id = self.root.after(0, self._startup)
+
+    def _startup(self):
+        def shown(result):
+            config = result['config']
+            self.saved = self.base = config
+            self.config_path = config.path
+            self._populate(config)
+            self._show_collection_status(result['status'])
+            self.status.set(result['message'])
+        self._start('Starting Docker Desktop and checking the saved Collector setup…',
+                    lambda: self.service.startup(self.config_path), shown)
 
     def _initial_status(self):
         if self.busy:
@@ -118,6 +131,8 @@ class DockerCollectorWindow(CollectorWindow):
         super().close()
 
     def _destroy(self):
+        if hasattr(self, 'startup_id'):
+            self.root.after_cancel(self.startup_id)
         if hasattr(self, 'status_poll'):
             self.root.after_cancel(self.status_poll)
         super()._destroy()
@@ -128,6 +143,6 @@ def launch(config_path):
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Linker.SCADA.Collector')
     root = tk.Tk()
-    DockerCollectorWindow(root, Path(config_path))
+    DockerCollectorWindow(root, Path(config_path), auto_start=True)
     root.mainloop()
     return 0

@@ -17,7 +17,7 @@ from collector.errors import CollectorError
 SERVER_SETUP_FIELDS=frozenset(('source_id','generation_id','upload_url','upload_enabled','upload_ca_file'))
 
 class CollectorWindow:
-    def __init__(self, root, config_path, service=None):
+    def __init__(self, root, config_path, service=None, load_on_open=True):
         self.root = root
         self.service = service or DesktopService()
         self.docker_managed = getattr(self.service, 'docker_managed', False) is True
@@ -31,6 +31,7 @@ class CollectorWindow:
         self.pending = queue.Queue()
         self.closed = False
         self.controls = []
+        self.fields = {}
         self.records = []
         self.detail_windows = []
         self.auto_thread = None
@@ -76,7 +77,7 @@ class CollectorWindow:
         self._populate(self.base)
         self._refresh_actions()
         self.poll_id = self.root.after(80, self._poll)
-        if self.config_path.exists():
+        if load_on_open and self.config_path.exists():
             self._load(self.config_path)
 
     def _styles(self):
@@ -114,12 +115,14 @@ class CollectorWindow:
         return button
 
     def _entry(self, parent, name, row, column, label, values=None, width=28):
-        ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=column, sticky="w", pady=(8, 5))
+        caption = ttk.Label(parent, text=label, style="Card.TLabel")
+        caption.grid(row=row, column=column, sticky="w", pady=(8, 5))
         options = dict(textvariable=self.variables[name], width=width)
         field = (ttk.Combobox(parent, values=values, state="readonly", **options) if values
                  else ttk.Entry(parent, **options))
         field.grid(row=row + 1, column=column, sticky="ew", padx=(0, 18))
         self.controls.append((field, "readonly" if values else "normal"))
+        self.fields[name] = (caption, field)
 
     def _build(self):
         shell = ttk.Frame(self.root)
@@ -184,7 +187,8 @@ class CollectorWindow:
         docker_card.pack(fill='both', expand=True)
         ttk.Label(docker_card, text='Collector Docker service', style='Title.TLabel').pack(anchor='w')
         docker_help = ('This window manages the single Docker Collector. Setup, previews, collection and uploads use its saved configuration.\n'
-                       'Keep Docker Desktop running. Closing this manager leaves the Docker Collector running.\n'
+                       'Opening this app starts Docker Desktop if needed and resumes an enabled, commissioned Collector.\n'
+                       'Closing this manager leaves the Docker Collector running.\n'
                        'Stop Collector stops the container normally and retains its queue and credentials.' if self.docker_managed else
                       'Existing native Windows setups are separate from this Docker deployment.\n'
                   'Keep Docker Desktop running to use Docker collection.\n'
@@ -342,10 +346,18 @@ class CollectorWindow:
                   'schedule_mode':'Schedule', 'schedule_timezone':'Schedule timezone (IANA)', 'schedule_time':'Daily/weekly time (HH:MM)',
                   'upload_ca_file':'Trusted upload CA file (blank uses public CAs)',
                   'schedule_weekday':'Weekly day (Monday=0, Sunday=6)'}
-        for index, name in enumerate(EDITABLE_FIELDS[9:]):
+        for index, name in enumerate(name for name in EDITABLE_FIELDS[9:] if name != 'upload_url'):
             options = ('True','False') if type(getattr(self.base, name)) is bool else {
                 'scan_mode':('id_range','marker'), 'privacy':('upload_all','omit','hash'), 'schedule_mode':('interval','daily','weekly')}.get(name)
             self._entry(form, name, (index//2)*2, index%2, labels[name], values=options, width=42)
+
+    def _sync_schedule_fields(self):
+        mode = self.variables['schedule_mode'].get()
+        for name, visible in (('interval_seconds', mode == 'interval'),
+                              ('schedule_time', mode in ('daily', 'weekly')),
+                              ('schedule_weekday', mode == 'weekly')):
+            for widget in self.fields.get(name, ()):
+                widget.grid() if visible else widget.grid_remove()
 
     def _show_collection_status(self, result):
         next_run=result.get('next_run')
@@ -420,7 +432,7 @@ class CollectorWindow:
         if self.busy or self._is_dirty() or self.upload_token.get():return
         config=self.saved
         self._start('Testing HTTPS, upload credential and source registration...',lambda:self.service.check_upload(config),
-                    lambda result:self._collection_message('Server connection verified: '+result['upload_url']+'. Credential and active source/generation accepted; no records were uploaded.'))
+                    lambda result:self._collection_message('Server connection verified. Credential and active source/generation accepted; no records were uploaded.'))
 
     def start_auto(self):
         if self.docker_running:
@@ -505,6 +517,7 @@ class CollectorWindow:
         self.upload_token.set('')
         self.location.set('Docker: /var/lib/linker-collector/setup/config.toml' if self.docker_managed else str(config.path))
         self.loading = False
+        self._sync_schedule_fields()
 
     def _credential_present(self, kind):
         if self.docker_managed:
@@ -521,10 +534,11 @@ class CollectorWindow:
         if self.password.get():
             return 'Store the entered database password before importing the server setup.'
         if any(self.variables[name].get()!=str(getattr(self.saved,name)) for name in EDITABLE_FIELDS if name not in SERVER_SETUP_FIELDS):
-            return 'Save local database, collection and schedule edits before importing. If the HTTPS URL is blank, keep Enable uploads set to False until import.'
+            return 'Save local database, collection and schedule edits before importing. Keep Enable uploads set to False until the encrypted server setup is imported.'
         return None
 
     def _refresh_actions(self):
+        self._sync_schedule_fields()
         for control, state in self.controls:
             control.configure(state="disabled" if self.busy else state)
         saved = not self._is_dirty()
@@ -856,7 +870,22 @@ def launch(config_path):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="SCADA Collector desktop setup")
     parser.add_argument("--config", type=Path, default=Path("collector-local/config.toml"))
-    return launch(parser.parse_args(argv).config)
+    parser.add_argument('--verify-package', action='store_true', help='Verify bundled Collector files without starting Docker or collection.')
+    args = parser.parse_args(argv)
+    if args.verify_package:
+        from deploy.collector.control import DockerControl
+        context = DockerControl().workspace
+        required = ('deploy/collector/Dockerfile', 'deploy/collector/requirements.lock',
+                    'deploy/docker-compose.collector.yml', 'deploy/docker-compose.collector.host.yml',
+                    'collector/docker_agent.py', 'shared/protocol.py')
+        if not all((context / name).is_file() for name in required):
+            return 1
+        if getattr(sys, 'frozen', False) and (context / 'server').exists():
+            return 1
+        if sys.stdout:
+            print(json.dumps(dict(component='collector', version=__version__, package_verified=True)))
+        return 0
+    return launch(args.config)
 
 
 if __name__ == "__main__":

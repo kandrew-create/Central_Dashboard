@@ -3,10 +3,7 @@ import argparse
 from pathlib import Path
 import shutil
 
-from deploy.wsl.build_payload import source_files
-
-RUNTIME_FILES = frozenset(('pyproject.toml', 'alembic.ini', '.dockerignore',
-                           'deploy/Dockerfile', 'deploy/requirements.lock'))
+RUNTIME_FILES = ('.dockerignore', 'deploy/collector/Dockerfile', 'deploy/collector/requirements.lock')
 COMPOSE_FILES = ('deploy/docker-compose.collector.yml', 'deploy/docker-compose.collector.host.yml')
 
 
@@ -14,10 +11,13 @@ def stage(root, output):
     root, output = Path(root).resolve(), Path(output).resolve()
     if output.exists() and any(output.iterdir()):
         raise ValueError('Use an empty output directory for the Collector Docker context.')
-    files = [path for path in source_files(root)
-             if path.relative_to(root).parts[0] in {'collector', 'server', 'shared'}
-             or path.relative_to(root).as_posix() in RUNTIME_FILES]
-    files.extend(root / name for name in COMPOSE_FILES)
+    files = [root / name for name in (*RUNTIME_FILES, *COMPOSE_FILES)]
+    for folder in ('collector', 'shared'):
+        for path in (root / folder).rglob('*'):
+            if (path.is_file() and path.suffix in ('.py', '.toml')
+                    and not {'tests', '__pycache__', 'secrets'}.intersection(path.relative_to(root).parts)
+                    and (path.suffix != '.toml' or path == root / 'collector/config.example.toml')):
+                files.append(path)
     if any(not path.is_file() or path.is_symlink() for path in files):
         raise ValueError('A required Collector Docker source is missing or is a symbolic link.')
     for path in files:

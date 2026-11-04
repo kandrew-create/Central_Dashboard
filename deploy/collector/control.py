@@ -46,7 +46,7 @@ class DockerControl:
             raise CollectorError('Cannot run Docker. Check Docker Desktop installation and access permissions.') from None
 
     def _engine(self):
-        result = self._execute(['info', '--format', '{{.OSType}}'])
+        result = self._execute(['info', '--format', '{{.OSType}}'], timeout=10)
         if result.returncode:
             # Classify internally; never expose Docker output or expanded settings.
             detail = (result.stderr or '').casefold()
@@ -56,6 +56,32 @@ class DockerControl:
         if result.stdout.strip() != 'linux':
             return False, 'The Docker Collector requires Linux containers. Switch Docker Desktop to Linux containers, then Refresh.'
         return True, None
+
+    def ensure_engine(self):
+        from deploy.collector.windows_runtime import ensure_desktop
+        ensure_desktop(self._engine)
+
+    def require_existing_setup(self):
+        # Do not let Compose create empty replacement data/key volumes on launch.
+        for volume in ('linker-collector_collector-data', 'linker-collector_collector-key'):
+            if self._execute(['volume', 'inspect', '--format', '{{.Name}}', volume]).returncode:
+                raise CollectorError('The existing Docker Collector data/key volumes are unavailable. Follow the '
+                                     'installation guide for a new PC, or restore the original volumes and key. No replacement was created.')
+        image = self._execute(['image', 'inspect', '--format', '{{.Id}}', 'linker-scada-collector:local'])
+        if image.returncode:
+            raise CollectorError('Build the separate Collector image using its installation guide before opening the app.')
+        check = self._execute(['run', '--rm', '--pull', 'never', '--read-only', '--network', 'none',
+                               '--log-driver', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+                               '--user', '10001:10001', '--mount',
+                               'type=volume,source=linker-collector_collector-data,target=/var/lib/linker-collector,readonly',
+                               '--mount', 'type=volume,source=linker-collector_collector-key,target=/run/collector-key,readonly',
+                               '--entrypoint', 'python', image.stdout.strip(), '-c',
+                               "from pathlib import Path; import sys; sys.exit(0 if "
+                               "Path('/var/lib/linker-collector/setup/config.toml').is_file() and "
+                               "Path('/run/collector-key/collector.key').is_file() else 1)"])
+        if check.returncode:
+            raise CollectorError('Saved Docker Collector configuration or its encryption key is missing. Follow the '
+                                 'installation guide for a new PC, or restore the existing setup and key. No queue was reset.')
 
     def command(self, *arguments):
         files = ['compose', '--project-name', 'linker-collector', '-f', str(self.compose)]

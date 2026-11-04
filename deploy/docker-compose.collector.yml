@@ -3,7 +3,7 @@ x-collector: &collector
   image: linker-scada-collector:local
   build:
     context: ..
-    dockerfile: deploy/Dockerfile
+    dockerfile: deploy/collector/Dockerfile
     target: collector
   read_only: true
   init: true
