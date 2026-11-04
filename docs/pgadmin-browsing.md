@@ -1,5 +1,7 @@
 # Simple Central Server browsing in pgAdmin
 
+For current installations upgraded through `0012_shared_source_storage`, new sources use **warehouse → Tables → fact_alarm_occurrence / fact_event_occurrence** and **reporting → Tables** for summaries. Original revisions remain in `platform`. Existing source-specific tables described below remain compatible, but are no longer created for new registrations. Add `warehouse,reporting` to a connection's schema restriction only after its reader has the required customer-scoped privileges; changing a navigation filter does not grant access. The existing Windows/WSL browser connection below was not reprovisioned by the VMware warehouse deployment. See [current warehouse structure](source-table-layout.md).
+
 ## Docker browser on this Central Server PC
 
 Open **Central Server Data - pgAdmin** from the desktop/Start menu, or visit **http://localhost:5050**. The browser runs pgAdmin 9.19 in the separate `linker-central-pgadmin` Compose project, using [the official container](https://www.pgadmin.org/docs/pgadmin4/latest/container_deployment.html). It connects to the existing private Central database network; PostgreSQL has no published host port, and pgAdmin is published on IPv4 loopback only.

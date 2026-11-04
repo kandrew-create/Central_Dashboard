@@ -1,4 +1,20 @@
-# Per-source native tables
+# Shared warehouse and legacy source tables
+
+Current Central storage uses three fixed schemas:
+
+| Schema | Objects and responsibility |
+| --- | --- |
+| `platform` | Authoritative registrations, generations, upload receipts, original alarm/event revisions, mappings, jobs and audit history. |
+| `warehouse` | Stored `fact_alarm_occurrence` and `fact_event_occurrence`, shared live dimension views and durable refresh queues. |
+| `reporting` | Maintained `alarm_hourly_summary`, `alarm_daily_summary`, `equipment_alarm_summary`, `source_upload_summary` and a dirty-day queue. |
+
+Migration `0011_stored_warehouse` backfills facts and summaries without rewriting original records. Migration `0012_shared_source_storage` stops creating physical schemas/tables for new source registrations. Source and generation UUIDs keep independent SCADA databases and reused native IDs separate. Alarm/event table identity is preserved, so an alarm ID and event ID with the same integer remain different occurrences. Facts contain one row per source/generation/native ID **within their record type**; changed copies increase saved-version counts rather than occurrence counts.
+
+The UUID dimension views refer to existing registration tables, so labels stay current without duplicated dimensions or changed identities. This is a shared star model with stored facts; historical dimension-label versioning is not implemented. Source-specific views are not automatically created for each new source. Existing physical source tables remain synchronized as a compatibility layer, with their OIDs, grants and history intact. They still consume additional storage; this upgrade does not silently drop them or convert them to views.
+
+All new stored tables enforce forced customer RLS. The private NOLOGIN, NOBYPASSRLS `scada_warehouse_owner` has explicit maintenance policies and narrowly exposed refresh entry points; runtime accounts must never inherit it. Reporting readers receive safe derived columns and cannot read original payload/operator fields or mutate data. See [refresh, summaries and security](central-server-analysis.md#stored-warehouse-architecture).
+
+## Legacy source-specific layout
 
 Central Server 0.6.1 names each source schema from the **SCADA PC/source name entered at registration**. For example, a source registered as `Oven Line SCADA` has `"Oven Line SCADA".alarmhistory` and `"Oven Line SCADA".eventhistory`. The source details in the manager show its SQL schema. Each schema contains exactly these two physical tables. Deleting a registration preserves its schema and history.
 

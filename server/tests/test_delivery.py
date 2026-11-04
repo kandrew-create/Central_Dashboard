@@ -476,7 +476,7 @@ class DeliveryIntegrationTests(PostgresCase):
                     self.assertEqual(db.execute(text("SELECT '\"Source\"'::regnamespace::oid")).scalar(),original_oid)
                     self.assertEqual(db.execute(text(f'SELECT al_tag_value FROM "{schema}".alarmhistory')).scalar(),'001.20')
                     self.assertEqual(db.execute(text('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions')).scalar(),fingerprint)
-                    self.assertEqual(db.execute(text('SELECT version_num FROM alembic_version')).scalar(),'0010_alarm_warehouse')
+                    self.assertEqual(db.execute(text('SELECT version_num FROM alembic_version')).scalar(),'0012_shared_source_storage')
                     self.assertIsNotNone(db.execute(text("SELECT to_regprocedure('platform.authenticate_upload(bytea)')")).scalar())
                     self.assertEqual(db.execute(text("SELECT count(*) FROM pg_tables WHERE schemaname='platform'")).scalar(),19)
                     with patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url}):

@@ -14,7 +14,7 @@ def report(db, days=30, source_id=None, customer_id=None):
         raise CollectorError('Select a valid registered source or customer.') from None
     if db.execute("SELECT to_regclass('warehouse.fact_alarm_occurrence') relation").fetchone()['relation'] is None:
         raise CollectorError('Apply Central Server migration 0010_alarm_warehouse before loading alarm analysis.')
-    return db.execute('''WITH selected AS MATERIALIZED (
+    result = db.execute('''WITH selected AS MATERIALIZED (
             SELECT f.*,s.name source_name,m.machine_tag,
                 (SELECT string_agg(DISTINCT candidate->>'label', ', ' ORDER BY candidate->>'label')
                  FROM jsonb_array_elements(f.ai_candidates) candidate) ai_suggestion
@@ -47,3 +47,30 @@ def report(db, days=30, source_id=None, customer_id=None):
             'issues',COALESCE((SELECT jsonb_agg(to_jsonb(issues)) FROM issues),'[]'::jsonb),
             'daily',COALESCE((SELECT jsonb_agg(to_jsonb(daily)) FROM daily),'[]'::jsonb)) report''',
                       dict(days=days, source=source, customer=customer)).fetchone()['report']
+    if db.execute("SELECT to_regclass('warehouse.refresh_queue') relation").fetchone()['relation'] is None:
+        result['freshness'] = dict(mode='live', pending_occurrences=0, pending_summaries=0, retrying_updates=0,
+                                   last_updated_at=None)
+    else:
+        result['freshness'] = db.execute('''WITH pending AS (
+                SELECT attempts FROM warehouse.refresh_queue
+                WHERE (%(source)s::uuid IS NULL OR source_id=%(source)s::uuid)
+                  AND (%(customer)s::uuid IS NULL OR customer_id=%(customer)s::uuid)
+            ), summaries AS (
+                SELECT customer_id,source_id FROM reporting.refresh_queue
+                UNION ALL SELECT customer_id,source_id FROM warehouse.source_refresh_queue
+            ), updated AS (
+                SELECT customer_id,source_id,refreshed_at FROM warehouse.fact_alarm_occurrence
+                UNION ALL SELECT customer_id,source_id,refreshed_at FROM warehouse.fact_event_occurrence
+                UNION ALL SELECT customer_id,source_id,refreshed_at FROM reporting.source_upload_summary
+            )
+            SELECT jsonb_build_object('mode','stored',
+                'pending_occurrences',(SELECT count(*) FROM pending),
+                'retrying_updates',(SELECT count(*) FROM pending WHERE attempts>0),
+                'pending_summaries',(SELECT count(*) FROM summaries
+                    WHERE (%(source)s::uuid IS NULL OR source_id=%(source)s::uuid)
+                      AND (%(customer)s::uuid IS NULL OR customer_id=%(customer)s::uuid)),
+                'last_updated_at',(SELECT max(refreshed_at) FROM updated
+                    WHERE (%(source)s::uuid IS NULL OR source_id=%(source)s::uuid)
+                      AND (%(customer)s::uuid IS NULL OR customer_id=%(customer)s::uuid))) freshness''',
+            dict(source=source, customer=customer)).fetchone()['freshness']
+    return result

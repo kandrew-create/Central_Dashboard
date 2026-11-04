@@ -463,7 +463,7 @@ class ManagerWindow:
 
     def selected(self,_=None):
         row=self._selected()
-        self.details.set(f"Source ID: {row['source_id']}\nGeneration ID: {row['generation_id']}\nSQL schema: {row.get('storage_schema') or 'Not available'}" if row else 'Select a source to export its collector setup.')
+        self.details.set(f"Source ID: {row['source_id']}\nGeneration ID: {row['generation_id']}\nStorage: {row.get('storage_schema') or 'Shared warehouse'}" if row else 'Select a source to export its collector setup.')
 
     def export_dialog(self):
         if self.busy:return

@@ -8,6 +8,7 @@ from server.app.db import runtime_engine
 from server.worker.processing import work_once
 from server.machine_ai import configuration
 from server.worker.machine_ai import interpret_once
+from server.worker.warehouse import refresh_once
 
 
 def main():
@@ -29,6 +30,17 @@ def main():
             stop.wait(2)
     ai_thread = threading.Thread(target=interpret, name='local-machine-ai', daemon=True)
     ai_thread.start()
+    def refresh_warehouse():
+        while not stop.is_set():
+            try:
+                if refresh_once(engine):
+                    continue
+            except Exception:
+                logging.error('Warehouse refresh unavailable; original records and pending updates are retained.')
+                stop.wait(10)
+            stop.wait(2)
+    warehouse_thread = threading.Thread(target=refresh_warehouse, name='warehouse-refresh', daemon=True)
+    warehouse_thread.start()
     try:
         while not stop.is_set():
             try:
@@ -40,6 +52,7 @@ def main():
     finally:
         stop.set()
         ai_thread.join(timeout=30)
+        warehouse_thread.join(timeout=20)
         engine.dispose()
 
 

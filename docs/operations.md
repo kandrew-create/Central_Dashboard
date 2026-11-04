@@ -1,5 +1,30 @@
 # Collector and central server operations
 
+## Stored warehouse operation
+
+Current Central storage separates original operational history (`platform`), stored occurrence facts and live UUID dimensions (`warehouse`), and maintained summaries (`reporting`). See [warehouse architecture](central-server-analysis.md#stored-warehouse-architecture) and [source storage compatibility](source-table-layout.md). Apply migrations `0011_stored_warehouse` and `0012_shared_source_storage` only to the separate Central database, with its configured services stopped and a verified private backup. Existing source tables/OIDs remain in place; new sources do not create physical schemas.
+
+The normal worker now also runs bounded warehouse maintenance independently of batch processing and Local AI. Committed revisions, approved-mapping reprocessing, latest-state changes and saved equipment identifications queue their occurrence identity. Reporting updates are transactional with their derived fact changes, with explicit freshness timestamps. A backlog means stored reporting can lag the authoritative original history; it does not mean the original batch was not accepted. Alarm analysis displays queued records/summaries and retrying updates. Original receipts, generations, source identities, pending Collector batches and mapping approval remain unchanged.
+
+On an authorized Central administration connection, inspect derived state without modifying source data:
+
+```sql
+SELECT customer_id,source_id,count(*) AS pending_occurrences,
+       min(queued_at) AS oldest_pending,
+       count(*) FILTER (WHERE attempts>0) AS retrying
+FROM warehouse.refresh_queue
+GROUP BY customer_id,source_id;
+
+SELECT customer_id,source_id,occurrence_date_utc,occurrences,refreshed_at
+FROM reporting.alarm_daily_summary
+ORDER BY refreshed_at DESC
+LIMIT 100;
+```
+
+Restricted readers require their authenticated transaction-local customer context; a schema filter is not authorization. Maintenance is worker-only (or an authorized migration administrator), through `warehouse.refresh_pending(200)`; it never approves mappings or calls a model. Do not clear queues, truncate facts, remove native tables or rotate credentials to bypass a refresh fault. Preserve the original history and inspect protected server diagnostics. Ordinary failures retain queued work for retry. Review timeout/load/index issues if large backlogs persist. Automatic retention and time partitioning are not configured by this update.
+
+The current VMware upgrade retained an encrypted database backup and original application/settings/vault archive under `/root/linker-warehouse-upgrade`, with its separate AES-GCM key under `/root/linker-warehouse-backup-keys`; both locations are private and outside Git/releases. Database archive decryption/authentication and pg_restore archive-list validation passed; a full restoration to a separate cluster was not part of the live deployment. Preserve the backup key with a separate protected handoff. Recovery must target reviewed Central storage, retain the current volumes until recovery succeeds and never restore into the SCADA source database.
+
 ## Commission locally
 
 Version 0.4 provides **Launch Central Server.cmd** with start/stop, health, registry, **4 Connection & mode** and encrypted collector setup export. Choose Local testing for one PC or Network server for multiple collector PCs uploading to one central server. Register each SCADA source separately and distribute its own encrypted setup. Collector **3 Collection & upload → Import server setup → Test server** verifies HTTPS and source registration before collection. Follow the [Windows guide](central-server-windows.md) for addresses, certificates and firewall access for every intended collector PC. Existing local settings load as Local testing without changing source IDs or data.

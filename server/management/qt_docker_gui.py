@@ -615,6 +615,8 @@ class DockerManagerWindow(QMainWindow):
         box.addLayout(row)
         self.analysis_summary = label('Choose a scope and analyze the saved alarms.', 'sectionTitle', True)
         box.addWidget(self.analysis_summary)
+        self.analysis_freshness = label('', 'help', True)
+        box.addWidget(self.analysis_freshness)
         self.analysis_note = label('Each source/generation/record ID counts once, including quarantined alarms. '
                                    'AI equipment suggestions are unverified and do not diagnose causes.', 'help', True)
         box.addWidget(self.analysis_note)
@@ -635,6 +637,7 @@ class DockerManagerWindow(QMainWindow):
         return page
 
     def _analysis_filter_changed(self, *args):
+        self.analysis_freshness.clear()
         self.analysis_issues.setRowCount(0)
         self.analysis_daily.setRowCount(0)
         self.analysis_summary.setText('Scope changed. Analyze saved alarms to update the results.')
@@ -679,9 +682,18 @@ class DockerManagerWindow(QMainWindow):
         self.analysis_issues.setRowCount(0)
         self.analysis_daily.setRowCount(0)
         if 'error' in result:
+            self.analysis_freshness.clear()
             self.analysis_summary.setText(result['error'])
             self.footer.setText('Alarm analysis could not be loaded. Saved records are retained.')
             return
+        freshness = result.get('freshness')
+        if freshness and freshness.get('mode') == 'stored':
+            updated = freshness.get('last_updated_at') or 'No processed records yet'
+            self.analysis_freshness.setText(
+                f"Warehouse updated: {updated} · {freshness['pending_occurrences']:,} record updates pending · "
+                f"{freshness['pending_summaries']:,} summaries pending · {freshness['retrying_updates']:,} retrying.")
+        else:
+            self.analysis_freshness.setText('Analysis reads the saved source history directly.')
         summary = result['summary']
         self.analysis_summary.setText(f"{summary['occurrences']:,} alarm occurrences · "
                                       f"{summary['saved_versions']:,} saved versions · "

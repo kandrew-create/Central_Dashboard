@@ -25,6 +25,8 @@ Pending automation work is tracked in the [CI/CD pipeline punchlist](docs/ci-cd-
 
 The updated WSL/Docker manager adds [alarm analysis and warehouse views](docs/central-server-analysis.md), minute-based refresh controls and automatic Docker/server startup. It keeps approved mappings separate from saved AI equipment suggestions; diagnostic AI remains future work.
 
+The current warehouse update adds stored alarm/event occurrence facts and precomputed summaries in fixed `platform`, `warehouse` and `reporting` schemas. New SCADA sources share these tables; existing source-specific tables and their identities remain compatible. Refresh runs independently of ingestion, with pending-update feedback in Alarm analysis. See [warehouse architecture and operation](docs/central-server-analysis.md#stored-warehouse-architecture).
+
 For development on Windows with WSL 2 and Docker Desktop, a native Linux management window now provides server controls, source registration and encrypted collector setup export. See [WSL / Docker setup and usage](docs/wsl-deployment.md). This deployment remains separate from the Windows installation.
 
 A separate [VMware Linux desktop bundle](docs/vmware-linux.md) builds Ubuntu 24.04 with Xfce and provisions Docker Engine plus the Central Server manager inside the guest. It uses a fresh isolated server and leaves the Collector on its separate PC. Its first boot requires network access; the existing Windows/WSL data is not migrated by building this VM.
