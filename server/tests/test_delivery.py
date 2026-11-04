@@ -42,6 +42,7 @@ class DeliveryIntegrationTests(PostgresCase):
         cls._run((ROOT/'server/migrations/sql/0007_log_browsing_views.sql').read_text(encoding='utf-8'))
         cls._run((ROOT/'server/migrations/sql/0008_source_tables.sql').read_text(encoding='utf-8'))
         cls._run((ROOT/'server/migrations/sql/0009_source_schema_names.sql').read_text(encoding='utf-8'))
+        cls._run((ROOT/'server/migrations/sql/0010_alarm_warehouse.sql').read_text(encoding='utf-8'))
         cls.roles = ['api_'+uuid4().hex,'worker_'+uuid4().hex,'source_'+uuid4().hex]
         for role,capability in zip(cls.roles[:2],('scada_ingest','scada_worker')):
             cls._run(f'CREATE ROLE "{role}" LOGIN; GRANT {capability} TO "{role}";')
@@ -454,6 +455,7 @@ class DeliveryIntegrationTests(PostgresCase):
                             EXECUTE format('DROP SCHEMA %I CASCADE',item.schema_name);
                         END LOOP;
                     END $$;'''))
+                    db.execute(text('DROP SCHEMA warehouse CASCADE'))
                     db.execute(text('DROP SCHEMA logs CASCADE'))
                     db.execute(text('DROP SCHEMA platform CASCADE'))
                     config=Config(str(ROOT/'alembic.ini'))
@@ -474,7 +476,7 @@ class DeliveryIntegrationTests(PostgresCase):
                     self.assertEqual(db.execute(text("SELECT '\"Source\"'::regnamespace::oid")).scalar(),original_oid)
                     self.assertEqual(db.execute(text(f'SELECT al_tag_value FROM "{schema}".alarmhistory')).scalar(),'001.20')
                     self.assertEqual(db.execute(text('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions')).scalar(),fingerprint)
-                    self.assertEqual(db.execute(text('SELECT version_num FROM alembic_version')).scalar(),'0009_source_schema_names')
+                    self.assertEqual(db.execute(text('SELECT version_num FROM alembic_version')).scalar(),'0010_alarm_warehouse')
                     self.assertIsNotNone(db.execute(text("SELECT to_regprocedure('platform.authenticate_upload(bytea)')")).scalar())
                     self.assertEqual(db.execute(text("SELECT count(*) FROM pg_tables WHERE schemaname='platform'")).scalar(),19)
                     with patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url}):

@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import subprocess
 
+from server.management.windows_docker import DesktopStartupError, ensure_desktop
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -17,10 +19,14 @@ def main():
                args.workspace.rstrip('/') + '/deploy/wsl/launch-manager.sh',
                '--project', args.project]
     try:
+        ensure_desktop(args.distribution)
         result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
         if result.returncode == 0:
             return 0
+    except DesktopStartupError as error:
+        ctypes.windll.user32.MessageBoxW(None, str(error), 'Central Server - WSL Docker', 0x10)
+        return 1
     except OSError:
         pass
     ctypes.windll.user32.MessageBoxW(

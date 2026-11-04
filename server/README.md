@@ -2,6 +2,8 @@
 
 The local 0.6.2 update [loads saved AI state and interpretations automatically](../docs/ai-display-refresh.md); enabling AI again is unnecessary. Published X3 downloads below remain 0.6.1.
 
+The updated WSL/Docker manager also provides [alarm trends and issue summaries](../docs/central-server-analysis.md), a read-only warehouse layer, refresh settings in minutes and automatic Docker/server startup. Upload credentials stay protected and the fixed upload URL is hidden from routine screens. Local AI suggests equipment names; root-cause diagnosis remains outside its scope.
+
 The current manager calls the tab **5 Equipment Identification** (**5 Local AI** in earlier builds). An AI model installed on the Central Server PC suggests equipment names from uploaded alarm messages/tags. Results include registered sources on other collector PCs uploading to this server, with each source named in the Source column; the view shows up to 200 results and does not combine separate Central Server databases. Version 0.5.1 identifies events directly from the machine tag selected at source registration; event messages are never sent to AI. Raw records and approved mapping behavior are preserved. See [X3 setup and verification](../docs/release-X3.md). X3 downloads below include Central Server 0.6.1; Collector remains 0.4.0.
 
 Version 0.5.2 separates equipment from the alarm condition (`Conveyor VFD Connect Error` identifies `Conveyor VFD`), rechecks earlier alarm results and shows the original message when a result is selected. Suggestions remain reviewable; literal inclusion in a message alone does not prove an accurate machine name.

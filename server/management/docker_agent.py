@@ -20,7 +20,7 @@ from server.management.service import ManagerService, text
 
 
 ACTIONS = frozenset(('counts', 'catalog', 'sources', 'register', 'delete_source', 'rotate',
-                     'export', 'batches', 'machine_interpretations', 'enable_machine_ai', 'disable_machine_ai'))
+                     'export', 'batches', 'machine_interpretations', 'enable_machine_ai', 'disable_machine_ai', 'alarm_analysis'))
 
 
 class DockerAgent(ManagerService):

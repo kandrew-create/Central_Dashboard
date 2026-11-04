@@ -231,6 +231,13 @@ class DockerManagerService:
             result['error'] = 'Docker Central Server is stopped. Use Start Docker server to resume it.'
         return result
 
+    def start_if_needed(self):
+        self._assert_current()
+        result = self.status()
+        if all(result[key] for key in ('api_ready', 'database_ready', 'worker_running')):
+            return result
+        return self.start()
+
     def start(self):
         self._assert_current()
         before = self._services()
@@ -313,7 +320,7 @@ class DockerManagerService:
     def load_refresh_settings(self):
         path = self.settings.data_dir / 'gui-refresh.json'
         if not path.exists():
-            return dict(interval_seconds=30)
+            return dict(interval_seconds=60)
         try:
             value = json.loads(private_read(path, 2048))
             if set(value) != {'interval_seconds'}:
@@ -326,7 +333,7 @@ class DockerManagerService:
     @staticmethod
     def _validate_refresh_interval(seconds):
         if type(seconds) is not int or (seconds != 0 and not 5 <= seconds <= 3600):
-            raise CollectorError('Choose Off (0), or an automatic refresh interval from 5 to 3600 seconds.')
+            raise CollectorError('Choose Off (0), or an automatic refresh interval from 0.08 to 60 minutes.')
 
     def save_refresh_settings(self, seconds):
         self._validate_refresh_interval(seconds)
@@ -339,6 +346,9 @@ class DockerManagerService:
 
     def sources(self):
         return self._rpc('sources')
+
+    def alarm_analysis(self, days=30, source_id=None, customer_id=None):
+        return self._rpc('alarm_analysis', dict(days=days, source_id=source_id, customer_id=customer_id))
 
     def register(self, **arguments):
         return self._rpc('register', arguments)

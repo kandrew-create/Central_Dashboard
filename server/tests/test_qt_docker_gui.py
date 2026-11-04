@@ -18,6 +18,69 @@ except ImportError:
 
 @unittest.skipUnless(QApplication is not None, 'optional Qt Docker GUI dependency is not installed')
 class ModernDockerWindowTests(unittest.TestCase):
+    def test_minutes_display_preserves_all_existing_saved_second_intervals(self):
+        for seconds in (0, *range(5, 3601)):
+            self.app.refresh_interval.setValue(seconds / 60)
+            self.assertEqual(self.app._refresh_seconds(), seconds)
+        self.app._set_refresh_preference(dict(interval_seconds=30))
+        self.assertEqual(self.app.refresh_interval.value(), 0.5)
+        self.assertEqual(self.app.refresh_interval.suffix(), ' minutes')
+        self.app.refresh_interval.setValue(2)
+        self.app.save_refresh_preference()
+        self.wait_idle()
+        self.service.save_refresh_settings.assert_called_once_with(120)
+
+    def test_application_startup_starts_selected_server_once_off_gui_thread(self):
+        self.destroy()
+        calls = []
+        gui_thread = threading.get_ident()
+        self.service.start_if_needed.side_effect = lambda: calls.append(threading.get_ident()) or self.status
+        self.app = DockerManagerWindow(self.service, auto_start=True)
+        self.app.show()
+        self.application.processEvents()
+        self.wait_idle()
+        self.service.start_if_needed.assert_called_once()
+        self.assertTrue(calls)
+        self.assertNotEqual(calls[0], gui_thread)
+        self.assertIn('server is ready', self.app.footer.text())
+        self.service.enable_machine_ai.assert_not_called()
+
+    def test_alarm_analysis_runs_off_gui_thread_and_keeps_ai_suggestions_separate(self):
+        threads = []
+        result = dict(summary=dict(occurrences=2, saved_versions=3, confirmed_equipment=1,
+                                   uncertain_time=1, uncertain_order=1, unmapped=1),
+                      issues=[dict(source_name='Fixture source', tag='TAG', message='Conveyor VFD Connect Error',
+                                   occurrences=1, confirmed_equipment='LINE-01', ai_suggestions='Conveyor VFD')],
+                      daily=[dict(day='2026-10-20', occurrences=1)])
+        self.service.alarm_analysis.side_effect = lambda **kwargs: threads.append(threading.get_ident()) or result
+        self.app.navigate(5)
+        self.wait_idle()
+        self.assertNotEqual(threads[0], threading.get_ident())
+        self.assertEqual(self.app.analysis_issues.item(0, 4).text(), 'LINE-01')
+        self.assertEqual(self.app.analysis_issues.item(0, 5).text(), 'Conveyor VFD')
+        self.assertIn('2 alarm occurrences', self.app.analysis_summary.text())
+        self.service.enable_machine_ai.assert_not_called()
+        self.app.analysis_days.setCurrentIndex(2)
+        self.assertEqual(self.app.analysis_issues.rowCount(), 0)
+
+    def test_upload_url_is_absent_from_routine_labels_and_copy_controls(self):
+        from PySide6.QtWidgets import QPushButton
+        self.assertFalse(any('/v1/uploads' in item.text() for item in self.app.findChildren(QLabel)))
+        self.assertFalse(any('Copy URL' == item.text() for item in self.app.findChildren(QPushButton)))
+
+    def test_background_analysis_failure_preserves_save_feedback_and_server_status(self):
+        self.app.navigate(5)
+        self.wait_idle()
+        self.app.footer.setText('Server settings saved successfully.')
+        self.service.alarm_analysis.side_effect = CollectorError('Analysis unavailable')
+        with patch('server.management.qt_docker_gui.QMessageBox.critical') as popup:
+            self.app.refresh(quiet=True)
+            self.wait_idle()
+        self.assertEqual(self.app.footer.text(), 'Server settings saved successfully.')
+        self.assertIn('Analysis unavailable', self.app.analysis_summary.text())
+        self.assertTrue(self.app.status['database_ready'])
+        popup.assert_not_called()
+
     def test_refresh_interval_waits_from_completion_and_pauses_during_work(self):
         self.app._set_refresh_preference(dict(interval_seconds=10))
         self.assertTrue(self.app.refresh_timer.isSingleShot())
@@ -89,7 +152,7 @@ class ModernDockerWindowTests(unittest.TestCase):
         self.wait_idle()
         self.assertEqual(self.service.settings.https_port, 9444)
         self.assertIn('saved successfully', self.app.footer.text())
-        self.assertIn(':9444/', self.app.overview_endpoint.text())
+        self.assertNotIn('https://', self.app.overview_endpoint.text())
         self.service.start.assert_not_called()
 
     def test_model_refresh_retains_unsaved_entry_and_never_enables_ai(self):
@@ -122,6 +185,8 @@ class ModernDockerWindowTests(unittest.TestCase):
         self.service.save_refresh_settings.side_effect = lambda seconds: dict(interval_seconds=seconds)
         self.service.machine_interpretations.return_value = dict(configuration=dict(enabled=False, model='Not configured'),
                                                                rows=[], records_available=True)
+        self.service.alarm_analysis.return_value = dict(summary=dict(occurrences=0, saved_versions=0, confirmed_equipment=0,
+            uncertain_time=0, uncertain_order=0, unmapped=0), issues=[], daily=[])
         self.app = DockerManagerWindow(self.service)
         self.app.show()
         self.addCleanup(self.destroy)
@@ -167,7 +232,7 @@ class ModernDockerWindowTests(unittest.TestCase):
         labels = [item.text() for item in self.app.findChildren(QLabel)]
         self.assertIn('NETWORK DEPLOYMENT', labels)
         self.assertIn('Network server (multiple collector PCs)', labels)
-        self.assertIn('https://192.0.2.10:8443/v1/uploads', labels)
+        self.assertNotIn('https://192.0.2.10:8443/v1/uploads', labels)
         self.assertNotIn('LOCAL DEPLOYMENT', labels)
 
     def test_activity_and_final_failure_message_are_retained(self):

@@ -18,6 +18,8 @@ For a Windows source-checkout shortcut, target `.venv\Scripts\pythonw.exe` with 
 
 On 2026-11-03, both development-PC shortcuts were repaired this way, retaining their icons and backing up the original links under ignored `.tools/`. An actual desktop-shortcut launch opened the WSL manager with no new visible console or Terminal window; the verification window was closed normally. This check did not restart the server or change its settings or data.
 
+The current source launcher also starts Docker Desktop if needed and waits for its local Linux engine before opening the manager. The updated manager starts its configured project once on open and reuses a ready server. The setup-launcher source has the same Desktop preparation; existing distributed installers require a rebuild to include this change. See [startup and analysis update](central-server-analysis.md).
+
 New builds bundle `central-server.ico` beside the Windows launcher, include it in checksum verification and use it for the launcher, installer, desktop shortcut and Start menu entries. The icon matches the WSL manager's blue server symbol and does not depend on the separate Windows Central Server installation. On the development PC, the existing WSL desktop shortcut was repaired with its own copy under `%LOCALAPPDATA%\Linker\central-server-wsl\central-server.ico`; the application it previously used for its icon had been uninstalled. Press **F5** on the desktop if Explorer still shows the cached blank icon. Earlier installer packages are unchanged until rebuilt.
 
 On custom HTTPS port 9444, exported collector setups use `https://localhost:9444/v1/uploads`. HTTP redirects to that HTTPS port. PostgreSQL and the API have no directly published ports. The HTTPS root returns 404 by design.

@@ -52,6 +52,12 @@ def text(value,label):
 
 class ManagerService:
     @operation
+    def alarm_analysis(self, days=30, source_id=None, customer_id=None):
+        from server.management.alarm_analysis import report
+        with self.connection() as db:
+            return report(db, days, source_id, customer_id)
+
+    @operation
     def enable_machine_ai(self, model):
         from server.machine_ai import LocalModel, save_configuration
         LocalModel(model).check()

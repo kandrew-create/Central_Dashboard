@@ -81,9 +81,11 @@ class PackageTests(unittest.TestCase):
             workspace='/home/test/selected-server', project='selected-project'))
         process = Mock()
         process.wait.return_value = 1
-        with patch('deploy.wsl.windows_setup.subprocess.Popen', return_value=process) as runner:
+        with patch('deploy.wsl.windows_setup.subprocess.Popen', return_value=process) as runner, patch(
+                'deploy.wsl.windows_setup.ensure_desktop') as desktop:
             with self.assertRaisesRegex(windows_setup.SetupError, 'could not open'):
                 setup.launch(wait=True)
+        desktop.assert_called_once_with('Ubuntu')
         arguments = runner.call_args.args[0]
         self.assertIn('/home/test/selected-server/deploy/wsl/launch-manager.sh', arguments)
         self.assertEqual(arguments[-2:], ['--project', 'selected-project'])

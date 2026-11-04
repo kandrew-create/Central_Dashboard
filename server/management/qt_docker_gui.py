@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QApplication, QAbstractItemView, QButtonGroup, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
-    QSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
+    QDoubleSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from collector.errors import CollectorError
@@ -26,6 +26,7 @@ PAGES = (
     ('Sources & setup', 'Manage registrations and export collector setup files.', 'sources'),
     ('Deployment', 'Your WSL workspace and Docker server connection.', 'deployment'),
     ('Equipment identification', 'Review saved results alongside the original message.', 'identification'),
+    ('Alarm analysis', 'Recurring alarms, daily trends and equipment evidence.', 'overview'),
 )
 
 
@@ -123,7 +124,7 @@ class ExportPasswordDialog(QDialog):
 
 
 class DockerManagerWindow(QMainWindow):
-    def __init__(self, service, auto_refresh=True):
+    def __init__(self, service, auto_refresh=True, auto_start=False):
         super().__init__()
         self.service = service
         self.busy = False
@@ -131,6 +132,7 @@ class DockerManagerWindow(QMainWindow):
         self.form_dirty = False
         self._ai_saved_model = None
         self._ai_pending = False
+        self._analysis_pending = False
         self._work = None
         self._done = None
         self._quiet_feedback = None
@@ -154,7 +156,9 @@ class DockerManagerWindow(QMainWindow):
         self.setStyleSheet(STYLESHEET)
         self._build()
         self._sync_controls()
-        if auto_refresh:
+        if auto_start:
+            QTimer.singleShot(0, self.startup_server)
+        elif auto_refresh:
             self.refresh()
 
     def button(self, title, action, style=None, symbol=None):
@@ -244,7 +248,7 @@ class DockerManagerWindow(QMainWindow):
         self.pages = QStackedWidget()
         content.addWidget(self.pages, 1)
         for builder in (self._overview_page, self._register_page, self._sources_page,
-                        self._deployment_page, self._identification_page):
+                        self._deployment_page, self._identification_page, self._analysis_page):
             self.pages.addWidget(builder())
         self.footer_frame = QFrame()
         self.footer_frame.setObjectName('footer')
@@ -341,14 +345,13 @@ class DockerManagerWindow(QMainWindow):
         row.addStretch()
         row.addWidget(label('HTTPS', 'pill'))
         box.addLayout(row)
-        box.addWidget(label('Collectors on this PC send their uploads to this endpoint.', 'muted', True))
+        box.addWidget(label('Import the encrypted server setup on each Collector. It supplies the saved connection and upload key.', 'muted', True))
         endpoint_box = QFrame()
         endpoint_box.setObjectName('endpointBox')
         endpoint_row = QHBoxLayout(endpoint_box)
         endpoint_row.setContentsMargins(15, 4, 6, 4)
-        self.overview_endpoint = label(self.service.settings.upload_url, 'endpoint')
+        self.overview_endpoint = label('Connection included in encrypted collector setup', 'endpoint')
         endpoint_row.addWidget(self.overview_endpoint, 1)
-        endpoint_row.addWidget(self.button('Copy URL', self.copy_url, 'quiet'))
         box.addWidget(endpoint_box)
         layout.addWidget(connection)
         getting_started, box = card()
@@ -476,11 +479,12 @@ class DockerManagerWindow(QMainWindow):
         refresh_box.addWidget(label('Automatic display refresh', 'sectionTitle'))
         refresh_row = QHBoxLayout()
         refresh_row.addWidget(label('Refresh every', 'fieldLabel'))
-        self.refresh_interval = QSpinBox()
-        self.refresh_interval.setRange(0, 3600)
-        self.refresh_interval.setSingleStep(5)
+        self.refresh_interval = QDoubleSpinBox()
+        self.refresh_interval.setRange(0, 60)
+        self.refresh_interval.setDecimals(2)
+        self.refresh_interval.setSingleStep(1)
         self.refresh_interval.setSpecialValueText('Off')
-        self.refresh_interval.setSuffix(' seconds')
+        self.refresh_interval.setSuffix(' minutes')
         self.controls.append(self.refresh_interval)
         refresh_row.addWidget(self.refresh_interval)
         refresh_row.addWidget(self.button('Save refresh setting', self.save_refresh_preference))
@@ -488,7 +492,7 @@ class DockerManagerWindow(QMainWindow):
         refresh_box.addLayout(refresh_row)
         self.refresh_note = label('Loading saved refresh interval…', 'help', True)
         refresh_box.addWidget(self.refresh_note)
-        refresh_box.addWidget(label('Choose Off, or 5–3600 seconds (default: 30). The interval starts after each refresh finishes. Updates health, received-data counts, sources and saved identification results while this window is open. '
+        refresh_box.addWidget(label('Choose Off, or up to 60 minutes (default: 1). Existing saved intervals are retained. The interval starts after each refresh finishes. Updates health, received-data counts, sources and saved identification results while this window is open. '
                                     'Refresh waits during other work or unsaved edits. Collector upload schedules are configured separately.', 'help', True))
         layout.addWidget(refresh_frame)
         frame, box = card()
@@ -533,7 +537,6 @@ class DockerManagerWindow(QMainWindow):
                              ('HTTPS listen address', self.service.settings.listen_address),
                              ('Compose project', self.service.settings.project),
                              ('Linux workspace', str(self.service.settings.workspace)),
-                             ('Collector endpoint', self.service.settings.upload_url),
                              ('Encrypted setup exports', str(self.service.export_directory))):
             box.addSpacing(7)
             box.addWidget(label(title.upper(), 'eyebrow'))
@@ -544,8 +547,8 @@ class DockerManagerWindow(QMainWindow):
         layout.addWidget(frame)
         note, box = card()
         box.addWidget(label('Connection & operation', 'sectionTitle'))
-        box.addWidget(label('Keep Docker Desktop running with Ubuntu integration enabled. PostgreSQL is private inside Docker. '
-                            'Collectors use the endpoint shown above.', 'muted', True))
+        box.addWidget(label('The Windows launcher starts Docker Desktop if needed; opening this manager starts its configured server containers. PostgreSQL is private inside Docker. '
+                            'Collectors receive the saved connection through their encrypted setup.', 'muted', True))
         box.addWidget(label('Verify Test server on every intended Collector PC. Network mode requires a matching certificate and firewall access.', 'help', True))
         box.addWidget(label('Closing this window leaves the server running. Stop server pauses this Docker project and preserves its data.', 'help', True))
         layout.addWidget(note)
@@ -591,6 +594,118 @@ class DockerManagerWindow(QMainWindow):
         layout.addStretch()
         return page
 
+    def _analysis_page(self):
+        page, layout = self._page()
+        frame, box = card()
+        row = QHBoxLayout()
+        self.analysis_customer = QComboBox()
+        self.analysis_customer.addItem('All customers', None)
+        self.analysis_source = QComboBox()
+        self.analysis_source.addItem('All sources', None)
+        self.analysis_days = QComboBox()
+        for days in (7, 30, 90, 365, 0):
+            self.analysis_days.addItem(f'First saved in last {days} days' if days else 'All saved alarms', days)
+        self.analysis_days.setCurrentIndex(1)
+        for widget in (self.analysis_customer, self.analysis_source, self.analysis_days):
+            self.controls.append(widget)
+            row.addWidget(widget)
+            widget.currentIndexChanged.connect(self._analysis_filter_changed)
+        row.addWidget(self.button('Analyze saved alarms', self.refresh_analysis, 'primary'))
+        box.addLayout(row)
+        self.analysis_summary = label('Choose a scope and analyze the saved alarms.', 'sectionTitle', True)
+        box.addWidget(self.analysis_summary)
+        self.analysis_note = label('Each source/generation/record ID counts once, including quarantined alarms. '
+                                   'AI equipment suggestions are unverified and do not diagnose causes.', 'help', True)
+        box.addWidget(self.analysis_note)
+        box.addWidget(label('RECURRING ALARMS · TOP 50 EXACT MESSAGE / TAG GROUPS', 'eyebrow'))
+        self.analysis_issues = self._table(('SOURCE', 'TAG', 'ORIGINAL MESSAGE', 'OCCURRENCES',
+                                          'APPROVED EQUIPMENT', 'AI SUGGESTIONS · UNVERIFIED'))
+        self.analysis_issues.setMinimumHeight(190)
+        box.addWidget(self.analysis_issues, 2)
+        box.addWidget(label('DAILY ALARM OCCURRENCES · KNOWN SOURCE START DATES IN UTC', 'eyebrow'))
+        self.analysis_daily = self._table(('UTC DAY', 'OCCURRENCES', 'RELATIVE ACTIVITY'))
+        self.analysis_daily.setMinimumHeight(125)
+        box.addWidget(self.analysis_daily, 1)
+        box.addWidget(label('The time filter uses when an occurrence was first saved by Central Server. '
+                            'Daily trends use verified source start dates; unknown or conflicting source times are excluded. '
+                            'Backfilled alarms may have older source dates. No alarm durations or current states are inferred. '
+                            'Retained history from removed sources is included in all-source totals.', 'help', True))
+        layout.addWidget(frame)
+        return page
+
+    def _analysis_filter_changed(self, *args):
+        self.analysis_issues.setRowCount(0)
+        self.analysis_daily.setRowCount(0)
+        self.analysis_summary.setText('Scope changed. Analyze saved alarms to update the results.')
+
+    def _analysis_filters(self):
+        for widget, title, rows, key in (
+                (self.analysis_customer, 'All customers', self.registry['customers'], 'customer_id'),
+                (self.analysis_source, 'All sources', self.source_rows, 'source_id')):
+            selected = widget.currentData()
+            widget.blockSignals(True)
+            widget.clear()
+            widget.addItem(title, None)
+            for row in rows:
+                widget.addItem(row['name'], str(row[key]))
+            widget.setCurrentIndex(max(0, widget.findData(selected)))
+            widget.blockSignals(False)
+
+    def refresh_analysis(self, preserve_feedback=False):
+        if self.busy:
+            self._analysis_pending = True
+            return
+        if not self.status.get('database_ready'):
+            self.analysis_summary.setText('Start the server to analyze its saved alarms.')
+            self.analysis_issues.setRowCount(0)
+            self.analysis_daily.setRowCount(0)
+            return
+        days, source, customer = (self.analysis_days.currentData(), self.analysis_source.currentData(),
+                                  self.analysis_customer.currentData())
+        previous = self.footer.text()
+        def operation():
+            try:
+                return self.service.alarm_analysis(days=days, source_id=source, customer_id=customer)
+            except CollectorError as error:
+                return dict(error=str(error))
+        def shown(result):
+            self._show_analysis(result)
+            if preserve_feedback:
+                self.footer.setText(previous)
+        self._start('Analyzing saved alarm occurrences…', operation, shown)
+
+    def _show_analysis(self, result):
+        self.analysis_issues.setRowCount(0)
+        self.analysis_daily.setRowCount(0)
+        if 'error' in result:
+            self.analysis_summary.setText(result['error'])
+            self.footer.setText('Alarm analysis could not be loaded. Saved records are retained.')
+            return
+        summary = result['summary']
+        self.analysis_summary.setText(f"{summary['occurrences']:,} alarm occurrences · "
+                                      f"{summary['saved_versions']:,} saved versions · "
+                                      f"{summary['confirmed_equipment']:,} approved equipment mappings")
+        self.analysis_note.setText(f"{summary['uncertain_time']:,} occurrences have uncertain source times; "
+                                   f"{summary['uncertain_order']:,} have uncertain revision order; "
+                                   f"{summary['unmapped']:,} lack a verified approved equipment mapping. "
+                                   'AI suggestions are unverified equipment labels, not diagnosed causes.')
+        self.analysis_issues.setRowCount(len(result['issues']))
+        for index, row in enumerate(result['issues']):
+            for column, value in enumerate((row['source_name'], row['tag'], row['message'], row['occurrences'],
+                                            row['confirmed_equipment'], row['ai_suggestions'])):
+                self.analysis_issues.setItem(index, column, QTableWidgetItem(str(value) if value is not None else 'Uncertain / unavailable'))
+        self.analysis_daily.setRowCount(len(result['daily']))
+        largest = max((row['occurrences'] for row in result['daily']), default=1)
+        for index, row in enumerate(result['daily']):
+            self.analysis_daily.setItem(index, 0, QTableWidgetItem(str(row['day'])))
+            self.analysis_daily.setItem(index, 1, QTableWidgetItem(str(row['occurrences'])))
+            bar = QProgressBar()
+            bar.setRange(0, 1000)
+            bar.setValue(round(row['occurrences'] * 1000 / largest))
+            bar.setTextVisible(False)
+            self.analysis_daily.setCellWidget(index, 2, bar)
+        self.footer.setText('Alarm analysis updated from saved records. AI settings are unchanged.')
+
     def navigate(self, index):
         self.pages.setCurrentIndex(index)
         self.nav_buttons[index].setChecked(True)
@@ -601,6 +716,11 @@ class DockerManagerWindow(QMainWindow):
                 self._ai_pending = True
             elif self.status:
                 self.refresh_identification()
+        elif index == 5:
+            if self.busy:
+                self._analysis_pending = True
+            elif self.status:
+                self.refresh_analysis()
 
     def _form_edited(self, *args):
         self.form_dirty = True
@@ -618,15 +738,12 @@ class DockerManagerWindow(QMainWindow):
         if hasattr(self, 'saved_deployment_labels'):
             self.saved_deployment_labels['Connection mode'].setText('Network server (multiple collector PCs)' if network else 'Local testing (one PC)')
             self.saved_deployment_labels['HTTPS listen address'].setText(self.service.settings.listen_address)
-            self.saved_deployment_labels['Collector endpoint'].setText(self.service.settings.upload_url)
         self.deployment_badge.setText('NETWORK DEPLOYMENT' if network else 'LOCAL DEPLOYMENT')
         self.sidebar_environment.setText('NETWORK SERVER' if network else 'LOCAL ENVIRONMENT')
         self.environment_badge.setText(('NETWORK' if network else 'LOCAL') + '  ·  WSL / DOCKER')
-        self.overview_endpoint.setText(self.service.settings.upload_url)
 
     def _update_deployment_preview(self):
-        self.deployment_preview.setText('Collector upload URL: https://' + self.deployment_fields['server_host'].text() +
-                                        ':' + self.deployment_fields['https_port'].text() + '/v1/uploads')
+        self.deployment_preview.setText('Collector connection will be included in encrypted setup exports after saving.')
         self.deployment_fields['http_port'].setEnabled(not self.busy and self.deployment_mode.currentData() == 'local')
 
     def _deployment_mode_changed(self, *args):
@@ -766,6 +883,9 @@ class DockerManagerWindow(QMainWindow):
         elif self._ai_pending and not self.busy:
             self._ai_pending = False
             self.refresh_identification(preserve_feedback=True)
+        elif self._analysis_pending and not self.busy:
+            self._analysis_pending = False
+            self.refresh_analysis(preserve_feedback=True)
         if not self.busy:
             self._arm_refresh_timer()
 
@@ -791,15 +911,22 @@ class DockerManagerWindow(QMainWindow):
         seconds = settings['interval_seconds']
         self._saved_refresh_interval = seconds
         self._refresh_preferences_loaded = True
-        self.refresh_interval.setValue(seconds)
+        self.refresh_interval.setValue(seconds / 60)
         self.refresh_timer.stop()
         self._arm_refresh_timer()
-        self.refresh_note.setText('Automatic refresh is off.' if not seconds else f'Automatic refresh every {seconds} seconds.')
+        self.refresh_note.setText(self._refresh_description())
+
+    def _refresh_seconds(self):
+        return round(self.refresh_interval.value() * 60)
+
+    def _refresh_description(self):
+        return ('Automatic refresh is off.' if not self._saved_refresh_interval else
+                f'Automatic refresh every {self._saved_refresh_interval / 60:.2f} minutes.')
 
     def save_refresh_preference(self):
         if self.busy:
             return
-        seconds = self.refresh_interval.value()
+        seconds = self._refresh_seconds()
         def saved(result):
             self._set_refresh_preference(result)
             self.footer.setText('Automatic refresh setting saved successfully.')
@@ -808,7 +935,7 @@ class DockerManagerWindow(QMainWindow):
     def _automatic_refresh(self):
         self.refresh_timer.stop()
         if (not self._saved_refresh_interval or self.busy or self.closing or not self.isVisible() or self.form_dirty or self._deployment_dirty()
-                or self.refresh_interval.value() != self._saved_refresh_interval
+                or self._refresh_seconds() != self._saved_refresh_interval
                 or (self._ai_saved_model is not None and self.ai_model.text() != self._ai_saved_model)):
             self._arm_refresh_timer()
             return
@@ -825,9 +952,7 @@ class DockerManagerWindow(QMainWindow):
             self._refresh_preferences_loaded = True
             self.refresh_note.setText(result['refresh_preferences_error'])
         else:
-            self.refresh_note.setText(('Automatic refresh is off. ' if not self._saved_refresh_interval else
-                                      f'Automatic refresh every {self._saved_refresh_interval} seconds. ') +
-                                     'Last refresh: ' + datetime.now().strftime('%H:%M:%S'))
+            self.refresh_note.setText(self._refresh_description() + ' Last refresh: ' + datetime.now().strftime('%H:%M:%S'))
         self.status = result['status']
         ready = all(self.status[key] for key in ('api_ready', 'database_ready', 'worker_running'))
         active = any(self.status[key] for key in ('api_ready', 'database_ready', 'worker_running'))
@@ -873,6 +998,9 @@ class DockerManagerWindow(QMainWindow):
         self.source_details.setVisible(bool(self.source_rows))
         self.source_actions.setVisible(bool(self.source_rows))
         self._source_selected()
+        self._analysis_filters()
+        if self.pages.currentIndex() == 5:
+            self._analysis_pending = True
         if 'ai' in result:
             self._show_identification(result['ai'])
         elif result.get('ai_error'):
@@ -886,6 +1014,10 @@ class DockerManagerWindow(QMainWindow):
             return
         self._start('Starting the Docker server…', self.service.start,
                     lambda result: self.refresh('Docker server started successfully.'))
+
+    def startup_server(self):
+        self._start('Checking and starting the configured Docker server…', self.service.start_if_needed,
+                    lambda result: self.refresh('Docker server is ready.'))
 
     def confirm(self, title, message):
         box = QMessageBox(QMessageBox.Icon.Question, title, message,
@@ -1036,17 +1168,13 @@ class DockerManagerWindow(QMainWindow):
         self.ai_evidence.setPlainText(self.ai_rows[index].get('original_message') or 'No original message available.'
                                       if 0 <= index < len(self.ai_rows) else '')
 
-    def copy_url(self):
-        QApplication.clipboard().setText(self.service.settings.upload_url)
-        self.footer.setText('Collector upload URL copied.')
-
     def closeEvent(self, event):
         if self.busy:
             self.closing = True
             self.footer.setText('Finishing the current operation before closing…')
             event.ignore()
         elif (self.form_dirty or self._deployment_dirty() or
-              self.refresh_interval.value() != self._saved_refresh_interval or
+              self._refresh_seconds() != self._saved_refresh_interval or
               (self._ai_saved_model is not None and self.ai_model.text() != self._ai_saved_model)) and not self.confirm(
                   'Close manager?', 'Discard unsaved registration, deployment or model edits and close this window? The server stays running.'):
             self.closing = False
@@ -1072,7 +1200,7 @@ def main(argv=None):
     except (CollectorError, OSError, ValueError):
         QMessageBox.critical(None, 'Central Server - WSL / Docker', 'Cannot open this workspace. Check its private .env, saved connection mode/address and WSL Compose files.')
         return 1
-    window = DockerManagerWindow(service)
+    window = DockerManagerWindow(service, auto_start=True)
     from server.management.desktop_identity import install_desktop_entry
     try:
         install_desktop_entry(service.settings.workspace, service.settings.project)

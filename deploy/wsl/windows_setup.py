@@ -13,6 +13,8 @@ import threading
 import time
 import urllib.request
 
+from server.management.windows_docker import DesktopStartupError, ensure_desktop
+
 
 class SetupError(Exception):
     pass
@@ -267,6 +269,10 @@ class Setup:
         configuration = self.saved_configuration()
         if not configuration or not configuration.get('ready'):
             raise ActionRequired('Finish WSL/Docker setup before opening its management window.')
+        try:
+            ensure_desktop(configuration['distribution'])
+        except DesktopStartupError as error:
+            raise SetupError(str(error)) from None
         command = [self.wsl, '--distribution', configuration['distribution'], '--exec', 'bash',
                    configuration['workspace'] + '/deploy/wsl/launch-manager.sh', '--project', configuration['project']]
         process = subprocess.Popen(command, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),

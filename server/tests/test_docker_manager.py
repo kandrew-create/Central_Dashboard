@@ -12,6 +12,15 @@ from server.management.docker_agent import main
 
 
 class DockerCommandTests(unittest.TestCase):
+    def test_startup_reuses_ready_project_without_recreating_services(self):
+        self.service.status = Mock(return_value=dict(api_ready=True, database_ready=True, worker_running=True))
+        self.service.start = Mock()
+        self.service.start_if_needed()
+        self.service.start.assert_not_called()
+        self.service.status.return_value = dict(api_ready=False, database_ready=False, worker_running=False)
+        self.service.start_if_needed()
+        self.service.start.assert_called_once()
+
     def test_container_ai_provider_selects_only_local_profile_and_internal_service(self):
         self.service.settings = DockerSettings(PurePosixPath('/tmp/linux-workspace'))
         self.service.ai_provider = 'container'

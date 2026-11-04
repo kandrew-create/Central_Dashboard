@@ -21,6 +21,8 @@ The X2 Central Server supports PostgreSQL 17 and 18, detects installed binaries 
 
 Pending automation work is tracked in the [CI/CD pipeline punchlist](docs/ci-cd-punchlist.md).
 
+The updated WSL/Docker manager adds [alarm analysis and warehouse views](docs/central-server-analysis.md), minute-based refresh controls and automatic Docker/server startup. It keeps approved mappings separate from saved AI equipment suggestions; diagnostic AI remains future work.
+
 For development on Windows with WSL 2 and Docker Desktop, a native Linux management window now provides server controls, source registration and encrypted collector setup export. See [WSL / Docker setup and usage](docs/wsl-deployment.md). This deployment remains separate from the Windows installation.
 
 A separate [WSL / Docker online package installer](docs/wsl-installer.md) prepares prerequisites, private Python/Qt, the server and its GUI shortcut. Build with `deploy/wsl/build-installer.ps1`; outputs and checksums go into a fresh `dist/wsl-docker/0.6.2-*` directory. Existing Windows installers are retained.

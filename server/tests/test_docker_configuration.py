@@ -22,7 +22,7 @@ class DeploymentSettingsTests(unittest.TestCase):
         self.assertEqual((directory / 'machine-ai.json').stat().st_mode & 0o777, 0o600)
 
     def test_refresh_preference_persists_without_docker_or_database_work(self):
-        self.assertEqual(self.service.load_refresh_settings(), dict(interval_seconds=30))
+        self.assertEqual(self.service.load_refresh_settings(), dict(interval_seconds=60))
         self.service.save_refresh_settings(15)
         reopened = DockerManagerService(self.root)
         self.assertEqual(reopened.load_refresh_settings(), dict(interval_seconds=15))
