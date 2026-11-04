@@ -72,6 +72,14 @@ class VMwareBundleTests(unittest.TestCase):
 
     def test_configuration_uses_a_desktop_guest_and_isolates_networking(self):
         result = vmx()
+        settings = dict(line.split(' = ', 1) for line in result.splitlines())
+        # VMXNET3 requires PCIe capacity; legacy slots cannot host this NIC.
+        root_ports = [key[:-11] for key, value in settings.items()
+                      if key.endswith('.virtualDev') and value == '"pcieRootPort"']
+        self.assertTrue(root_ports, 'The network adapter needs a PCIe root port.')
+        self.assertTrue(any(settings.get(port+'.present') == '"TRUE"'
+                            and int(settings[port+'.functions'].strip('"')) > 0 for port in root_ports))
+        self.assertNotIn('ethernet0.pciSlotNumber', settings)
         self.assertIn('firmware = "efi"', result)
         self.assertIn('memsize = "8192"', result)
         self.assertIn('ethernet0.connectionType = "nat"', result)

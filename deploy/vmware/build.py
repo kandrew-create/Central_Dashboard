@@ -62,6 +62,11 @@ def vmx(memory_mb=8192, cpus=4):
         '.encoding = "UTF-8"', 'config.version = "8"', 'virtualHW.version = "19"',
         'displayName = "Linker Central Server - Ubuntu Docker"', 'guestOS = "ubuntu-64"',
         'firmware = "efi"', f'memsize = "{memory_mb}"', f'numvcpus = "{cpus}"',
+        'pciBridge0.present = "TRUE"',
+        *(line for bridge in range(4, 8) for line in (
+            f'pciBridge{bridge}.present = "TRUE"',
+            f'pciBridge{bridge}.virtualDev = "pcieRootPort"',
+            f'pciBridge{bridge}.functions = "8"')),
         'scsi0.present = "TRUE"', 'scsi0.virtualDev = "lsilogic"',
         'scsi0:0.present = "TRUE"', 'scsi0:0.fileName = "central-server.vmdk"',
         'sata0.present = "TRUE"', 'sata0:0.present = "TRUE"',

@@ -37,7 +37,7 @@ usermod -aG docker linker
 systemctl mask lightdm.service
 printf 'linux-desktop\n' >/var/lib/linker-vm/phase
 printf 'lightdm shared/default-x-display-manager select lightdm\n' | debconf-set-selections
-apt-get install -y xfce4 lightdm xorg dbus-x11 open-vm-tools-desktop \
+apt-get install -y xfce4 lightdm xorg dbus-x11 open-vm-tools-desktop firefox xdg-utils \
   libegl1 libopengl0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
   libxcb-render-util0 libxcb-xinerama0 libxkbcommon-x11-0
 install -m 755 /run/linker-seed/package/install_guest.py /opt/linker-vm/install_guest.py

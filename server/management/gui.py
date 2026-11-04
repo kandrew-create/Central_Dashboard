@@ -110,8 +110,7 @@ class ManagerWindow:
         ttk.Label(card,text='Server health',style='Title.TLabel').pack(anchor='w')
         ttk.Label(card,textvariable=self.health_text,style='Card.TLabel',font=(self.font_family,12,'bold')).pack(anchor='w',pady=(10,6))
         ttk.Label(card,textvariable=self.metrics,style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=4)
-        ttk.Label(card,text='Saved record versions includes the first copy of each alarm or event. Unchanged records add nothing. '
-                  'Batches awaiting machine mapping are saved and waiting for an approved machine assignment.',
+        ttk.Label(card,text='Saved record versions includes the first copy of each alarm or event. Unchanged records add nothing.',
                   style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=4)
         ttk.Label(card,textvariable=self.endpoint,style='Card.TLabel').pack(anchor='w',pady=4)
         bar=ttk.Frame(card,style='Card.TFrame');bar.pack(fill='x',pady=8)
@@ -289,9 +288,9 @@ class ManagerWindow:
         ttk.Label(card,text='Registered SCADA sources',style='Title.TLabel').pack(anchor='w',pady=(0,12))
         bottom=ttk.Frame(card,style='Card.TFrame');bottom.pack(side='bottom',fill='x')
         area=ttk.Frame(card,style='Card.TFrame');area.pack(fill='both',expand=True)
-        columns=('Source','Customer','Site','Project','Source ID','Generation ID','Last received','Awaiting mapping')
+        columns=('Source','Customer','Site','Project','Source ID','Generation ID','Last received')
         self.tree=ttk.Treeview(area,columns=columns,show='headings',selectmode='browse')
-        for name,width in zip(columns,(180,120,110,130,280,280,190,150)):
+        for name,width in zip(columns,(180,120,110,130,280,280,190)):
             self.tree.heading(name,text=name);self.tree.column(name,width=width,minwidth=70,stretch=False)
         vertical=ttk.Scrollbar(area,command=self.tree.yview)
         horizontal=ttk.Scrollbar(area,orient='horizontal',command=self.tree.xview)
@@ -377,7 +376,7 @@ class ManagerWindow:
         status=result['status']
         self.health_text.set(f"HTTPS API: {'Ready' if status['api_ready'] else 'Stopped'}   |   PostgreSQL: {'Ready' if status['database_ready'] else 'Stopped'}   |   Worker: {'Running' if status['worker_running'] else 'Stopped'}")
         self.metrics.set(f"Sources: {status['sources']}   Received batches: {status['batches']}   Saved record versions: {status['revisions']}\n"
-                         f"Batches awaiting machine mapping: {status['quarantined_batches']}   Failed processing jobs: {status['failed_jobs']}")
+                         f"Failed processing jobs: {status['failed_jobs']}")
         self.endpoint.set('Collector upload endpoint: '+status['upload_url'])
         settings=self.service.settings
         self.connection_summary.set(('Local testing: collectors on this PC only.' if settings.mode=='local' else 'Network server: collectors connect using '+settings.server_host+'.')+
@@ -388,7 +387,7 @@ class ManagerWindow:
         children=self.tree.get_children()
         if children:self.tree.delete(*children)
         for key,row in self.source_rows.items():
-            self.tree.insert('', 'end', iid=key,values=(row['name'],row['customer_name'],row['site_name'],row['project_name'],key,str(row['generation_id'] or ''),str(row['last_received'] or 'No uploads'),row['quarantined_batches']))
+            self.tree.insert('', 'end', iid=key,values=(row['name'],row['customer_name'],row['site_name'],row['project_name'],key,str(row['generation_id'] or ''),str(row['last_received'] or 'No uploads')))
         if selected and selected[0] in self.source_rows:self.tree.selection_set(selected[0])
         else:self.selected()
         if result.get('machine_ai') is not None:

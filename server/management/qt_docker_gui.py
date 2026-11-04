@@ -327,8 +327,7 @@ class DockerManagerWindow(QMainWindow):
         self.metric_values = {}
         for key, title, hint in (('sources', 'Registered sources', 'SCADA database connections'),
                                  ('batches', 'Received batches', 'Durably saved uploads'),
-                                 ('revisions', 'Saved record versions', 'Includes first copies'),
-                                 ('quarantined_batches', 'Batches awaiting machine mapping', 'Batches already saved')):
+                                 ('revisions', 'Saved record versions', 'Includes first copies')):
             frame, column = card()
             column.setContentsMargins(18, 18, 18, 17)
             column.setSpacing(7)
@@ -453,7 +452,7 @@ class DockerManagerWindow(QMainWindow):
         empty.addSpacing(6)
         empty.addWidget(self.button('Register source', lambda: self.navigate(1), 'primary', 'register'), 0, Qt.AlignmentFlag.AlignCenter)
         box.addWidget(self.source_empty)
-        self.source_table = self._table(('SOURCE', 'CUSTOMER', 'SITE', 'PROJECT', 'LAST RECEIVED', 'AWAITING MAPPING'))
+        self.source_table = self._table(('SOURCE', 'CUSTOMER', 'SITE', 'PROJECT', 'LAST RECEIVED'))
         self.source_table.itemSelectionChanged.connect(self._source_selected)
         box.addWidget(self.source_table, 1)
         self.source_details = label('Select a source to view its identity and export its setup.', 'help', True)
@@ -972,7 +971,7 @@ class DockerManagerWindow(QMainWindow):
                                      (f"{self.status['failed_jobs']:,}" if self.status['database_ready'] else '—'))
         if self.status['sources']:
             self.next_title.setText('Keep your collectors connected')
-            self.next_hint.setText('Manage sources, export setup files and review records awaiting machine mapping.')
+            self.next_hint.setText('Manage sources, export setup files and review alarm analysis.')
         else:
             self.next_title.setText('Connect your first source')
             self.next_hint.setText('Register a SCADA database, then export its encrypted collector setup.')
@@ -985,7 +984,7 @@ class DockerManagerWindow(QMainWindow):
         selected_index = -1
         for index, source in enumerate(self.source_rows):
             values = (source['name'], source['customer_name'], source['site_name'], source['project_name'],
-                      str(source['last_received'] or 'No uploads yet'), str(source['quarantined_batches']))
+                      str(source['last_received'] or 'No uploads yet'))
             for column, value in enumerate(values):
                 self.source_table.setItem(index, column, QTableWidgetItem(str(value)))
             if selected and str(source['source_id']) == str(selected['source_id']):
