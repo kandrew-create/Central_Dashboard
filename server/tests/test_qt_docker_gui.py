@@ -254,16 +254,22 @@ class ModernDockerWindowTests(unittest.TestCase):
 
     def test_registration_validates_before_backend_and_normalizes_labels(self):
         for key, value in (('customer', 'Customer'), ('site', 'Site'), ('project', 'Bad\x01label'),
-                           ('machine', 'LINE-01'), ('source', 'SCADA PC')):
+                           ('source', 'SCADA PC')):
             self.app.names[key].setText(value)
         with patch('server.management.qt_docker_gui.QMessageBox.warning'):
             self.app.register_source()
         self.service.register.assert_not_called()
         self.app.names['project'].setText('  Line\tProject  ')
+        with patch('server.management.qt_docker_gui.QMessageBox.warning'):
+            self.app.register_source()
+        self.service.register.assert_not_called()
+        self.assertIn('Select an existing machine', self.app.footer.text())
+        self.select_registered_machine()
+        self.app.names['source'].setText('  SCADA\tPC  ')
         self.app.register_source()
         self.wait_idle()
         self.service.register.assert_called_once()
-        self.assertEqual(self.service.register.call_args.kwargs['project_name'], 'Line Project')
+        self.assertEqual(self.service.register.call_args.kwargs['source_name'], 'SCADA PC')
         self.assertEqual(self.app.pages.currentIndex(), 2)
         self.assertFalse(self.app.form_dirty)
         self.assertIn('Source registered', self.app.footer.text())
@@ -314,7 +320,7 @@ class ModernDockerWindowTests(unittest.TestCase):
         self.assertEqual(dialog.confirmation.text(), '')
         dialog.deleteLater()
 
-    def test_registry_reuse_keeps_parent_ids_and_disables_new_name_fields(self):
+    def select_registered_machine(self):
         customer = dict(customer_id='customer-id', name='Customer')
         site = dict(customer_id='customer-id', site_id='site-id', name='Site')
         project = dict(customer_id='customer-id', site_id='site-id', project_id='project-id', name='Project')
@@ -325,7 +331,11 @@ class ModernDockerWindowTests(unittest.TestCase):
         self.wait_idle()
         for name in ('customer', 'site', 'project', 'machine'):
             self.app.choices[name].setCurrentIndex(1)
-            self.assertFalse(self.app.names[name].isEnabled())
+            if name != 'machine':
+                self.assertFalse(self.app.names[name].isEnabled())
+
+    def test_registry_reuse_keeps_parent_ids_and_disables_new_name_fields(self):
+        self.select_registered_machine()
         self.app.names['source'].setText('Another fixture source')
         self.app.register_source()
         self.wait_idle()
@@ -334,6 +344,7 @@ class ModernDockerWindowTests(unittest.TestCase):
         self.assertEqual(values['site_id'], 'site-id')
         self.assertEqual(values['project_id'], 'project-id')
         self.assertEqual(values['machine_id'], 'machine-id')
+        self.assertNotIn('machine_tag', values)
 
     def test_export_dispatches_selected_identity_and_password_without_replacing_existing_files(self):
         self.service.sources.return_value = [dict(source_id='fixture-source', generation_id='fixture-generation', name='Fixture',

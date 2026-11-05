@@ -383,21 +383,23 @@ class DockerManagerWindow(QMainWindow):
         self.names = {}
         for index, name in enumerate(('customer', 'site', 'project', 'machine')):
             row = index * 3
-            title = 'Machine tag' if name == 'machine' else name.title()
+            title = 'Existing machine' if name == 'machine' else name.title()
             grid.addWidget(label(title, 'fieldLabel'), row, 0)
-            grid.addWidget(label('New ' + title.lower(), 'fieldLabel'), row, 1)
             combo = QComboBox()
-            combo.addItem('Create new ' + name, None)
-            entry = QLineEdit()
-            entry.setPlaceholderText('Enter ' + title.lower())
-            grid.addWidget(combo, row + 1, 0)
-            grid.addWidget(entry, row + 1, 1)
+            combo.addItem('Select existing machine' if name == 'machine' else 'Create new ' + name, None)
+            grid.addWidget(combo, row + 1, 0, 1, 2 if name == 'machine' else 1)
+            if name != 'machine':
+                grid.addWidget(label('New ' + title.lower(), 'fieldLabel'), row, 1)
+                entry = QLineEdit()
+                entry.setPlaceholderText('Enter ' + title.lower())
+                grid.addWidget(entry, row + 1, 1)
+                self.names[name] = entry
+                self.controls.append(entry)
+                entry.textChanged.connect(self._form_edited)
             grid.setRowMinimumHeight(row + 2, 10)
             self.choices[name] = combo
-            self.names[name] = entry
-            self.controls.extend((combo, entry))
+            self.controls.append(combo)
             combo.currentIndexChanged.connect(lambda index, field=name: self._choice_changed(field))
-            entry.textChanged.connect(self._form_edited)
         grid.addWidget(label('SCADA PC / database source name', 'fieldLabel'), 12, 0, 1, 2)
         self.names['source'] = QLineEdit()
         self.names['source'].setPlaceholderText('A clear name for this SCADA database source')
@@ -411,6 +413,7 @@ class DockerManagerWindow(QMainWindow):
         actions.addStretch()
         box.addLayout(actions)
         box.addWidget(label('Database credentials, collection history and schedules stay on the Collector PC.', 'help', True))
+        box.addWidget(label('Select a previously registered machine under its customer, site and project.', 'help', True))
         layout.addWidget(frame)
         layout.addStretch()
         return page
@@ -831,7 +834,7 @@ class DockerManagerWindow(QMainWindow):
                 records = [row for row in records if parent and str(row[ancestor + '_id']) == str(parent[ancestor + '_id'])]
             box.blockSignals(True)
             box.clear()
-            box.addItem('Create new ' + name, None)
+            box.addItem('Select existing machine' if name == 'machine' else 'Create new ' + name, None)
             for record in records:
                 box.addItem(record.get('machine_tag', record['name']), record)
                 if previous and str(previous[name + '_id']) == str(record[name + '_id']):
@@ -843,7 +846,8 @@ class DockerManagerWindow(QMainWindow):
         for control in self.controls:
             control.setEnabled(not self.busy)
         for name, choice in getattr(self, 'choices', {}).items():
-            self.names[name].setEnabled(not self.busy and choice.currentData() is None)
+            if name in self.names:
+                self.names[name].setEnabled(not self.busy and choice.currentData() is None)
         ready = all(self.status.get(key, False) for key in ('api_ready', 'database_ready', 'worker_running'))
         self.start_button.setEnabled(not self.busy and not ready)
         self.stop_button.setEnabled(not self.busy and any(self.status.get(key, False) for key in ('initialized', 'api_ready', 'database_ready', 'worker_running')))
@@ -1051,10 +1055,14 @@ class DockerManagerWindow(QMainWindow):
         values = {}
         try:
             for name, parameter, title in (('customer', 'customer_name', 'customer name'), ('site', 'site_name', 'site name'),
-                                            ('project', 'project_name', 'project name'), ('machine', 'machine_tag', 'machine tag')):
+                                            ('project', 'project_name', 'project name')):
                 existing = self.choices[name].currentData()
                 values[name + '_id'] = existing[name + '_id'] if existing else None
                 values[parameter] = '' if existing else text(self.names[name].text(), title)
+            machine = self.choices['machine'].currentData()
+            if machine is None:
+                raise CollectorError('Select an existing machine under the selected customer, site and project.')
+            values['machine_id'] = machine['machine_id']
             values['source_name'] = text(self.names['source'].text(), 'SCADA PC/database source name')
         except CollectorError as error:
             self.footer.setText(str(error))

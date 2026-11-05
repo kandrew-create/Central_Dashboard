@@ -12,6 +12,7 @@ from server.management.service import ManagerService,text
 from server.management.settings import ServerSettings,load_settings,save_settings
 
 NEW='<Create new>'
+EXISTING_MACHINE='<Select existing machine>'
 MODES={'Local testing (one PC)':'local','Network server (multiple collector PCs)':'network'}
 
 
@@ -50,8 +51,8 @@ class ManagerWindow:
         self.server_host=tk.StringVar(root,s.server_host)
         self.connection_summary=tk.StringVar(root)
         self.url_preview=tk.StringVar(root)
-        self.names={name:tk.StringVar(root) for name in ('customer','site','project','machine','source')}
-        self.choices={name:tk.StringVar(root,NEW) for name in ('customer','site','project','machine')}
+        self.names={name:tk.StringVar(root) for name in ('customer','site','project','source')}
+        self.choices={name:tk.StringVar(root,EXISTING_MACHINE if name=='machine' else NEW) for name in ('customer','site','project','machine')}
         root.title(self.window_title)
         root.geometry('1220x830');root.minsize(1080,750)
         root.protocol('WM_DELETE_WINDOW',self.close)
@@ -268,19 +269,21 @@ class ManagerWindow:
         for index,name in enumerate(('customer','site','project','machine')):
             row=index*3+1
             ttk.Label(card,text='Existing '+name,style='Card.TLabel').grid(row=row,column=0,sticky='w')
-            ttk.Label(card,text='New '+('machine tag' if name=='machine' else name+' name'),style='Card.TLabel').grid(row=row,column=1,sticky='w')
-            box=ttk.Combobox(card,textvariable=self.choices[name],values=(NEW,),state='readonly',width=42)
-            box.grid(row=row+1,column=0,sticky='ew',padx=(0,16),pady=(4,12))
+            placeholder=EXISTING_MACHINE if name=='machine' else NEW
+            box=ttk.Combobox(card,textvariable=self.choices[name],values=(placeholder,),state='readonly',width=42)
+            box.grid(row=row+1,column=0,columnspan=2 if name=='machine' else 1,sticky='ew',padx=(0,0 if name=='machine' else 16),pady=(4,12))
             box.bind('<<ComboboxSelected>>',lambda _,key=name:self._cascade(key))
             self.boxes[name]=box;self.controls.append((box,'readonly'))
-            entry=ttk.Entry(card,textvariable=self.names[name]);entry.grid(row=row+1,column=1,sticky='ew',pady=(4,12))
-            self.controls.append((entry,'normal'))
+            if name!='machine':
+                ttk.Label(card,text='New '+name+' name',style='Card.TLabel').grid(row=row,column=1,sticky='w')
+                entry=ttk.Entry(card,textvariable=self.names[name]);entry.grid(row=row+1,column=1,sticky='ew',pady=(4,12))
+                self.controls.append((entry,'normal'))
         ttk.Label(card,text='SCADA PC / database source name',style='Card.TLabel').grid(row=13,column=0,columnspan=2,sticky='w')
         entry=ttk.Entry(card,textvariable=self.names['source']);entry.grid(row=14,column=0,columnspan=2,sticky='ew',pady=(4,10))
         self.controls.append((entry,'normal'))
         self.register_button=self.button(card,'Register source and generate IDs',self.register_source)
         self.register_button.grid(row=15,column=0,columnspan=2,sticky='w',pady=8)
-        ttk.Label(card,text='Registration creates the Source ID, Generation ID and protected upload credential. Database connection settings and collection schedules stay on the SCADA PC.',
+        ttk.Label(card,text='Select a previously registered machine under its customer, site and project. Registration creates the Source ID, Generation ID and protected upload credential. Database connection settings and collection schedules stay on the SCADA PC.',
                   style='Card.TLabel',wraplength=1000).grid(row=16,column=0,columnspan=2,sticky='w',pady=8)
 
     def _sources_tab(self,parent):
@@ -336,8 +339,9 @@ class ManagerWindow:
                 records=[row for row in records if row.get(ancestor+'_id')==parent[ancestor+'_id']]
             mapping={f"{row.get('machine_tag',row['name'])} [{row[name+'_id']}]":row for row in records}
             self.choice_maps[name]=mapping
-            self.boxes[name].configure(values=(NEW,*mapping))
-            self.choices[name].set(NEW)
+            placeholder=EXISTING_MACHINE if name=='machine' else NEW
+            self.boxes[name].configure(values=(placeholder,*mapping))
+            self.choices[name].set(placeholder)
 
     def _start(self,label,work,done):
         if self.busy:return False
@@ -438,7 +442,7 @@ class ManagerWindow:
         values={}
         try:
             for name,key,label in (('customer','customer_name','customer name'),('site','site_name','site name'),
-                                   ('project','project_name','project name'),('machine','machine_tag','machine tag'),
+                                   ('project','project_name','project name'),
                                    ('source','source_name','SCADA PC/database source name')):
                 row=self._chosen(name) if name!='source' else None
                 if name!='source':values[name+'_id']=row[name+'_id'] if row else None
@@ -446,6 +450,10 @@ class ManagerWindow:
                 if row is None:
                     values[key]=text(values[key],label)
                     self.names[name].set(values[key])
+            machine=self._chosen('machine')
+            if machine is None:
+                raise CollectorError('Select an existing machine under the selected customer, site and project.')
+            values['machine_id']=machine['machine_id']
         except CollectorError as error:
             self.status_text.set(str(error))
             messagebox.showerror('Registration settings',str(error),parent=self.root)

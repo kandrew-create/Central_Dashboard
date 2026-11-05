@@ -42,7 +42,7 @@ The updated status label **Saved record versions** includes the first saved copy
 
 ## Register a future source
 
-On the central server PC, open **2 Register SCADA source**. Select existing customer/site/project/machine entries or create the missing entries, then supply a distinct SCADA PC/database source name. **Register source and generate IDs** creates the source, generation, protected upload credential and draft mapping version. Export that source's setup from tab 3.
+On the central server PC, open **2 Register SCADA source**. Select the existing customer, site and project, then choose its **existing machine** and supply a distinct SCADA PC/database source name. The current source manager removes **New machine tag**; it never creates a machine from this form and requires a machine selection before calling the backend. Have the Central Server administrator register the machine and its parent hierarchy first if it is not listed. **Register source and generate IDs** creates the source, generation, protected upload credential and draft mapping version. Export that source's setup from tab 3. Existing machine identities and credential/event scope are retained; previously published installers are unchanged.
 
 New names must contain 1–255 characters after trimming. The current build replaces pasted tabs and line breaks with spaces before validation and storage, so copying a wrapped project name does not cause a misleading length error. Empty names, names over the limit and other unsupported control characters have distinct messages. The form checks new names before starting database work; selecting an existing item reuses it without requiring its new-name field.
 
