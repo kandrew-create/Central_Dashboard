@@ -49,7 +49,6 @@ class DockerCollectorWindow(CollectorWindow):
         saved = not self._is_dirty()
         can_start = ready and saved and self.saved.collection_enabled and not self.password.get() and not self.upload_token.get() and not self.busy and not self.docker_running
         self.auto_button.configure(state='normal' if can_start else 'disabled')
-        self.docker_start_button.configure(state='normal' if can_start else 'disabled')
         self.collect_button.configure(state='normal' if ready and saved and self.saved.collection_enabled and not self.password.get() and not self.busy and not self.docker_running else 'disabled')
         self.stop_button.configure(state='normal' if not self.busy and self.docker_running or self.manual_collecting and not self.cycle_stop.is_set() else 'disabled')
         self.import_button.configure(state='normal' if not self.busy and not self.docker_running else 'disabled')
@@ -60,6 +59,7 @@ class DockerCollectorWindow(CollectorWindow):
         self.docker_running = result.get('running', self.docker_running)
         self.docker_engine_ready = result.get('engine_ready', self.docker_engine_ready)
         state = 'running' if self.docker_running else 'stopped'
+        self.sidebar_status.set('Check collector status' if self.docker_engine_ready is False else 'Collector ' + state)
         self.docker_status.set(result.get('message') or 'Docker Collector is ' + state + '. Closing this manager leaves its current state unchanged.')
         if result.get('engine_ready') is False:
             self._collection_message(self.docker_status.get())

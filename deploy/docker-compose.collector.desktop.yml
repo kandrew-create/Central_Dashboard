@@ -1,0 +1,37 @@
+services:
+  desktop:
+    image: linker-scada-collector-desktop:local
+    build:
+      context: ..
+      dockerfile: deploy/collector/Dockerfile.desktop
+    profiles: [desktop]
+    container_name: linker-collector-desktop
+    init: true
+    restart: 'no'
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Launch resolves the existing socket group; no root user/privileged mode.
+    # This local administration GUI needs engine access; worker images never do.
+    group_add: ['${COLLECTOR_DOCKER_GID:?Use deploy/collector/launch-container.sh}']
+    tmpfs: [/tmp]
+    logging: {driver: none}
+    environment:
+      DISPLAY: ':0'
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: /mnt/wslg/.X11-unix
+        target: /tmp/.X11-unix
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${COLLECTOR_HANDOFF_DIR:-../collector-handoff}
+        target: /handoff
+        read_only: true
+        bind: {create_host_path: false}

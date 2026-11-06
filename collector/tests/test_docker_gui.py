@@ -16,6 +16,29 @@ from deploy.collector.desktop import DockerDesktopService
 
 @unittest.skipIf(tk is None, 'Tk is not installed')
 class DockerManagerWindowTests(unittest.TestCase):
+    def test_identity_references_are_read_only_and_save_preserves_full_ids(self):
+        for name in ('source_id', 'generation_id'):
+            self.assertEqual(self.app.identity_references[name].get(), 'Not configured')
+            self.assertEqual(self.app.fields[name][1].winfo_class(), 'TLabel')
+        assigned = replace(self.config, source_id='11111111-1111-4111-8111-11111111a3f9',
+                           generation_id='22222222-2222-4222-8222-22222222c812')
+        self.app._settings_loaded(assigned)
+        self.app._refresh_actions()
+        self.assertEqual(self.app.identity_references['source_id'].get(), '…a3f9')
+        self.assertEqual(self.app.identity_references['generation_id'].get(), '…c812')
+        self.app.variables['database'].set('edited_scada')
+        self.service.save.return_value = replace(assigned, database='edited_scada')
+        self.app.save_settings()
+        self.wait_idle()
+        candidate, previous = self.service.save.call_args.args
+        self.assertEqual(previous, assigned)
+        self.assertEqual(candidate.source_id, assigned.source_id)
+        self.assertEqual(candidate.generation_id, assigned.generation_id)
+        self.assertEqual(self.app.variables['source_id'].get(), assigned.source_id)
+        self.assertEqual(self.app.variables['generation_id'].get(), assigned.generation_id)
+        self.assertEqual(self.app.identity_references['source_id'].get(), '…a3f9')
+        self.assertEqual(self.app.identity_references['generation_id'].get(), '…c812')
+
     def test_schedule_hides_interval_and_retains_its_value(self):
         self.app.variables['interval_seconds'].set('180')
         for mode in ('daily', 'weekly'):
@@ -92,6 +115,11 @@ class DockerManagerWindowTests(unittest.TestCase):
         self.assertFalse(self.app.busy)
 
     def test_start_uses_docker_service_and_never_starts_native_scheduler(self):
+        button_labels = [widget.cget('text') for widget, _ in self.app.controls
+                         if widget.winfo_class() == 'TButton']
+        self.assertNotIn('Reload Docker settings', button_labels)
+        self.assertIn('Refresh status', button_labels)
+        self.assertEqual(len(self.app.notebook.tabs()), 3)
         self.app.saved = self.app.base = replace(self.config, collection_enabled=True, all_history=True)
         self.app._populate(self.app.saved)
         with patch('collector.runtime.run') as native:
@@ -150,19 +178,16 @@ class DockerManagerWindowTests(unittest.TestCase):
         choose.assert_not_called()
         self.service.import_setup.assert_not_called()
 
-    def test_both_start_buttons_require_saved_enabled_collection(self):
+    def test_start_requires_saved_enabled_collection(self):
         self.assertTrue(self.app.auto_button.instate(('disabled',)))
-        self.assertTrue(self.app.docker_start_button.instate(('disabled',)))
         self.app.docker_action('start')
         self.service.start.assert_not_called()
         self.app.saved = self.app.base = replace(self.config, collection_enabled=True, all_history=True)
         self.app._populate(self.app.saved)
         self.app._refresh_actions()
         self.assertFalse(self.app.auto_button.instate(('disabled',)))
-        self.assertFalse(self.app.docker_start_button.instate(('disabled',)))
         self.app.variables['host'].set('edited-source.example')
         self.assertTrue(self.app.auto_button.instate(('disabled',)))
-        self.assertTrue(self.app.docker_start_button.instate(('disabled',)))
         self.app.docker_action('start')
         self.service.start.assert_not_called()
 

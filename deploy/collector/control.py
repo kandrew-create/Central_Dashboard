@@ -19,6 +19,7 @@ class DockerControl:
                           if self.frozen else Path(__file__).resolve().parents[2])
         self.compose = self.workspace / 'deploy/docker-compose.collector.yml'
         self.native_config = native_config
+        self.containerized = Path('/run/linker-collector-desktop').is_file()
 
     def _execute(self, arguments, timeout=30, payload=None):
         try:
@@ -88,6 +89,10 @@ class DockerControl:
         host = self.compose.with_name('docker-compose.collector.host.yml')
         if host.is_file():
             files += ['-f', str(host)]
+        if self.containerized:
+            # Nested Compose must not interpret the GUI's /app directory as a
+            # host bind mount. Setup import already travels through stdin RPC.
+            files += ['-f', str(self.compose.with_name('docker-compose.collector.container.yml'))]
         return files + list(arguments)
 
     def rpc(self, action, arguments=None, stop=None):

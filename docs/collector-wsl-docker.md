@@ -1,5 +1,8 @@
 # Collector on WSL 2 and Docker
 
+The [container desktop](collector-container-desktop.md) also runs the interface
+inside Docker, displayed through WSLg, with no Windows Collector runtime.
+
 [Verification and remaining commissioning steps](collector-wsl-docker-verification-2026-11-01.md).
 
 The Collector can run its CLI and scheduler on Linux, including Docker Desktop's WSL 2 engine. The separate Central Server remains on its own PC. Use `deploy/docker-compose.collector.yml` on the Collector PC; the Central Server uses `deploy/docker-compose.yml` on the server PC. This does not install PostgreSQL or migrate the SCADA database.

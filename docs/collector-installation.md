@@ -1,5 +1,9 @@
 # Install the separate SCADA Collector 0.4.1
 
+For the interface and engine entirely inside Linux Docker containers, use the
+[Docker desktop installation](collector-container-desktop.md). The EXE package
+below retains a native Windows interface and is a separate deployment option.
+
 Install this package on the **Collector PC**, not the Central Server development PC. The Collector has its own installer, Docker image, Compose project (`linker-collector`), data volume and encryption-key volume. It does not install Central Server, PostgreSQL server, Ollama, PLC drivers, ODBC drivers or SCADA software. Local AI runs on the Central Server PC and consumes no Ollama RAM on the Collector PC.
 
 ## Before installation

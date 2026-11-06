@@ -1,0 +1,6 @@
+# Applied by the container GUI to its child scheduler. No host-path bindings.
+services:
+  collector:
+    volumes: !override
+      - collector-data:/var/lib/linker-collector
+      - collector-key:/run/collector-key:ro

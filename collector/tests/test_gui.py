@@ -77,6 +77,9 @@ class DesktopWindowTests(unittest.TestCase):
 
     def test_sidebar_navigation_preserves_edits_and_footer_at_minimum_size(self):
         app = self.create()
+        self.assertEqual([button.cget('text') for button in app.navigation],
+                         ['Connection & setup', 'Alarm & event preview', 'Collection & upload'])
+        self.assertEqual(len(app.notebook.tabs()), 3)
         self.root.geometry('1280x800')
         self.root.deiconify()
         app.variables['host'].set('edited-source.example')
@@ -115,8 +118,7 @@ class DesktopWindowTests(unittest.TestCase):
         alarm.assert_not_called()
         self.assertTrue(app.connected)
         self.assertEqual(app.tree.get_children(), ('0',))
-        self.assertTrue(app.docker_start_button.instate(('disabled',)))
-        self.assertTrue(app.docker_stop_button.instate(('disabled',)))
+        self.assertFalse(app.docker_engine_ready)
         self.assertIn('Docker Desktop is not running', app.docker_status.get())
 
     def test_docker_stop_without_engine_reports_status_without_stopping_native(self):
@@ -365,6 +367,8 @@ class DesktopWindowTests(unittest.TestCase):
         self.service.import_setup.assert_called_once_with(self.config,'setup.linker-collector','file password only')
         self.assertEqual(app.saved,updated)
         self.assertEqual(app.variables['source_id'].get(),updated.source_id)
+        self.assertEqual(app.identity_references['source_id'].get(), '…0001')
+        self.assertEqual(app.identity_references['generation_id'].get(), '…0002')
         self.assertEqual(app.password.get(),'');self.assertEqual(app.upload_token.get(),'')
         self.assertFalse(app.connected)
 

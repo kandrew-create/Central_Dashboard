@@ -15,6 +15,7 @@ from collector.desktop import DesktopService, EDITABLE_FIELDS, default_config, f
 from collector.errors import CollectorError
 
 SERVER_SETUP_FIELDS=frozenset(('source_id','generation_id','upload_url','upload_enabled','upload_ca_file'))
+UI_FONT = 'Segoe UI' if sys.platform == 'win32' else 'DejaVu Sans'
 
 class CollectorWindow:
     def __init__(self, root, config_path, service=None, load_on_open=True):
@@ -40,11 +41,15 @@ class CollectorWindow:
         self.manual_collecting = False
         self.docker_running = False
         self.docker_engine_ready = None
+        self.docker_status = tk.StringVar(root, 'Collection is stopped.')
+        self.sidebar_status = tk.StringVar(root, 'Checking collection…' if self.docker_managed else 'Collection stopped')
         self.collection_status = tk.StringVar(root, 'Collection is stopped. Configure and save settings before starting.')
         self.upload_token = tk.StringVar(root)
         self.upload_credential_status = tk.StringVar(root)
         self.setup_import_status = tk.StringVar(root)
         self.variables = {name: tk.StringVar(root) for name in EDITABLE_FIELDS}
+        self.identity_references = {name: tk.StringVar(root, 'Not configured')
+                                    for name in ('source_id', 'generation_id')}
         self.password = tk.StringVar(root)
         self.location = tk.StringVar(root)
         self.status = tk.StringVar(root, "Create or open a setup to get started.")
@@ -64,7 +69,7 @@ class CollectorWindow:
                 pass
         self.root.geometry("1420x900")
         self.root.minsize(1280, 800)
-        self.root.configure(bg="#f3f6fa")
+        self.root.configure(bg="#f4f6fb")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self._styles()
         self._build()
@@ -84,29 +89,35 @@ class CollectorWindow:
         style = ttk.Style(self.root)
         style.theme_use("clam")
         for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont"):
-            tkfont.nametofont(name, root=self.root).configure(family="Segoe UI", size=10)
-        style.configure("TFrame", background="#f3f6fa")
+            tkfont.nametofont(name, root=self.root).configure(family=UI_FONT, size=10)
+        style.configure("TFrame", background="#f4f6fb")
         style.configure("Card.TFrame", background="#ffffff")
-        style.configure("TLabel", background="#f3f6fa", foreground="#17283e")
-        style.configure("Card.TLabel", background="#ffffff", foreground="#17283e")
-        style.configure("Muted.TLabel", background="#ffffff", foreground="#627287")
-        style.configure("Title.TLabel", background="#ffffff", foreground="#17283e", font=("Segoe UI", 15, "bold"))
-        style.configure("TButton", padding=(14, 8), background="#e8eef6", foreground="#17283e")
-        style.configure("Primary.TButton", background="#2265d7", foreground="white")
-        style.map("Primary.TButton", background=[("disabled", "#d5deea"), ("active", "#184eab")],
-                  foreground=[("disabled", "#66758a")])
+        style.configure("Footer.TFrame", background="#ffffff")
+        style.configure("Footer.TLabel", background="#ffffff", foreground="#64748b", font=(UI_FONT, 9))
+        style.configure("TLabel", background="#f4f6fb", foreground="#26334a")
+        style.configure("Card.TLabel", background="#ffffff", foreground="#26334a")
+        style.configure("Muted.TLabel", background="#ffffff", foreground="#5f6f86")
+        style.configure("Title.TLabel", background="#ffffff", foreground="#21324e", font=(UI_FONT, 11, "bold"))
+        style.configure("TButton", padding=(15, 9), background="#ffffff", foreground="#40526e", bordercolor="#dce3ef")
+        style.map("TButton", background=[("disabled", "#f4f6fa"), ("active", "#f1f5fc")],
+                  foreground=[("disabled", "#a7b2c4")])
+        style.configure("Primary.TButton", background="#356ff0", foreground="white", bordercolor="#356ff0")
+        style.map("Primary.TButton", background=[("disabled", "#b5c8f4"), ("active", "#255bd3")],
+                  bordercolor=[("disabled", "#b5c8f4"), ("active", "#255bd3")],
+                  foreground=[("disabled", "white")])
         style.configure("TEntry", padding=7, fieldbackground="white")
         style.configure("TCombobox", padding=6, fieldbackground="white")
-        style.configure("TNotebook", background="#f3f6fa", borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(22, 12), font=("Segoe UI", 10, "bold"))
+        style.configure("TNotebook", background="#f4f6fb", borderwidth=0)
+        style.configure("TNotebook.Tab", padding=(22, 12), font=(UI_FONT, 10, "bold"))
         style.map("TNotebook.Tab", background=[("selected", "white")], foreground=[("selected", "#2265d7")])
         style.layout('Sidebar.TNotebook.Tab', [])
-        style.configure('Sidebar.TNotebook', background='#f4f6fb', borderwidth=0)
+        style.configure('Sidebar.TNotebook', background='#f4f6fb', borderwidth=0,
+                        bordercolor='#f4f6fb', lightcolor='#f4f6fb', darkcolor='#f4f6fb')
         style.configure("Treeview", rowheight=34, background="white", fieldbackground="white", borderwidth=0)
         style.configure("Treeview.Heading", padding=(8, 10), background="#eaf0f7", foreground="#33465e",
-                        font=("Segoe UI", 10, "bold"))
+                        font=(UI_FONT, 10, "bold"))
         style.configure("Card.TCheckbutton", background="white", foreground="#33465e")
-        style.configure("Horizontal.TProgressbar", background="#2265d7", troughcolor="#e8eef6", borderwidth=0)
+        style.configure("Horizontal.TProgressbar", background="#4e83ef", troughcolor="#eaf0fc", borderwidth=0, thickness=5)
 
     def _button(self, parent, title, command, primary=False):
         button = ttk.Button(parent, text=title, command=command,
@@ -127,53 +138,67 @@ class CollectorWindow:
     def _build(self):
         shell = ttk.Frame(self.root)
         shell.pack(fill='both', expand=True)
-        sidebar = tk.Frame(shell, bg='#101c32', width=220, padx=18, pady=28)
+        sidebar = tk.Frame(shell, bg='#101c32', width=224, padx=18, pady=28)
         sidebar.pack(side='left', fill='y')
         sidebar.pack_propagate(False)
-        tk.Label(sidebar, text='LINKER', bg='#101c32', fg='white',
-                 font=('Segoe UI', 23, 'bold')).pack(anchor='w')
-        tk.Label(sidebar, text='SCADA COLLECTOR', bg='#101c32', fg='#8294b3',
-                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(4, 34))
+        brand = tk.Frame(sidebar, bg='#101c32')
+        brand.pack(anchor='w', pady=(0, 34))
+        tk.Label(brand, text='L', bg='#477dfa', fg='white', width=2,
+                 font=(UI_FONT, 18, 'bold')).pack(side='left', padx=(0, 8))
+        names = tk.Frame(brand, bg='#101c32')
+        names.pack(side='left')
+        tk.Label(names, text='linker', bg='#101c32', fg='white',
+                 font=(UI_FONT, 18, 'bold')).pack(anchor='w')
+        tk.Label(names, text='SCADA COLLECTOR', bg='#101c32', fg='#8294b3',
+                 font=(UI_FONT, 8)).pack(anchor='w')
         tk.Label(sidebar, text='WORKSPACE', bg='#101c32', fg='#8397b5',
-                 font=('Segoe UI', 9, 'bold')).pack(anchor='w', pady=(0, 12))
-        self.page_titles = ('Connection & setup', 'Alarm & event preview', 'Collection & upload', 'Docker deployment')
+                 font=(UI_FONT, 8, 'bold')).pack(anchor='w', pady=(0, 12))
+        self.page_titles = ('Connection & setup', 'Alarm & event preview', 'Collection & upload')
         self.page_descriptions = (
             'Configure this PC’s read-only source connection and protected credentials.',
             'Inspect original source fields and timestamp quality before collecting.',
-            'Manage scheduled collection, server setup and confirmed delivery.',
-            'Start, stop and inspect the Collector Docker service from this app.')
+            'Manage scheduled collection, server setup and confirmed delivery.')
         self.navigation = []
         for index, title in enumerate(self.page_titles):
             button = tk.Button(sidebar, text=title, anchor='w', relief='flat', bd=0,
                                padx=12, pady=13, bg='#101c32', fg='#a8b8d0',
-                               activebackground='#233a5d', activeforeground='white',
-                               font=('Segoe UI', 10), cursor='hand2',
+                               activebackground='#192a46', activeforeground='white',
+                               highlightbackground='#101c32', highlightcolor='#6d9aee',
+                               font=(UI_FONT, 10), cursor='hand2',
                                command=lambda page=index: self._navigate(page))
             button.pack(fill='x', pady=3)
             self.navigation.append(button)
-        tk.Label(sidebar, text='READ-ONLY SOURCE\nOutbound HTTPS delivery\nDurable local queue',
-                 justify='left', bg='#101c32', fg='#91a3bf', font=('Segoe UI', 9),
-                 wraplength=180).pack(side='bottom', anchor='w', pady=12)
+        notes = tk.Frame(sidebar, bg='#101c32')
+        notes.pack(side='bottom', fill='x')
+        tk.Frame(notes, bg='#26344e', height=1).pack(fill='x', pady=(0, 16))
+        tk.Label(notes, text='LOCAL COLLECTOR', bg='#101c32', fg='#8397b5',
+                 font=(UI_FONT, 8, 'bold')).pack(anchor='w')
+        tk.Label(notes, text='Read-only SCADA access\nOutbound HTTPS delivery',
+                 justify='left', bg='#101c32', fg='#91a3bf', font=(UI_FONT, 8)).pack(anchor='w', pady=(6, 8))
+        tk.Label(notes, textvariable=self.sidebar_status, bg='#101c32', fg='#91a3bf',
+                 font=(UI_FONT, 8), wraplength=180, justify='left').pack(anchor='w')
+        tk.Label(notes, text=f'Linker · v{__version__}', bg='#101c32', fg='#91a3bf',
+                 font=(UI_FONT, 8)).pack(anchor='w', pady=(18, 0))
         workspace = ttk.Frame(shell)
         workspace.pack(side='left', fill='both', expand=True)
-        header = ttk.Frame(workspace, padding=(24, 22))
+        header = ttk.Frame(workspace, padding=(32, 27, 32, 21))
         header.pack(fill='x')
-        ttk.Label(header, text='COLLECTOR WORKSPACE', foreground='#63758f',
-                  font=('Segoe UI', 9, 'bold')).pack(anchor='w')
-        self.page_title = ttk.Label(header, font=('Segoe UI', 23, 'bold'))
+        ttk.Label(header, text='SCADA COLLECTOR  /  WORKSPACE', foreground='#63758f',
+                  font=(UI_FONT, 8, 'bold')).pack(anchor='w')
+        self.page_title = ttk.Label(header, foreground='#182742', font=(UI_FONT, 20, 'bold'))
         self.page_title.pack(anchor='w', pady=(6, 4))
         self.page_description = ttk.Label(header, foreground='#5f6f86')
         self.page_description.pack(anchor='w')
-        toolbar = ttk.Frame(workspace, padding=(24, 6))
+        toolbar = ttk.Frame(workspace, padding=(32, 6))
         toolbar.pack(fill="x")
         ttk.Label(toolbar, textvariable=self.location, foreground="#607086").pack(side="left", fill="x", expand=True)
         if not self.docker_managed:
             self._button(toolbar, "New setup…", self.new_setup).pack(side="right", padx=(8, 0))
-        self._button(toolbar, "Reload Docker settings" if self.docker_managed else "Open settings…", self.open_settings).pack(side="right")
-        self.footer = ttk.Frame(workspace, padding=(24, 12))
+            self._button(toolbar, "Open settings…", self.open_settings).pack(side="right")
+        self.footer = ttk.Frame(workspace, style='Footer.TFrame', padding=(30, 13))
         self.footer.pack(side='bottom', fill='x')
         self.notebook = ttk.Notebook(workspace, style='Sidebar.TNotebook')
-        self.notebook.pack(fill="both", expand=True, padx=24)
+        self.notebook.pack(fill="both", expand=True, padx=32)
         connection_tab = ttk.Frame(self.notebook, padding=(0, 16))
         preview_tab = ttk.Frame(self.notebook, padding=(0, 16))
         self.notebook.add(connection_tab, text="1   Connection & setup")
@@ -181,31 +206,6 @@ class CollectorWindow:
         collection_tab = ttk.Frame(self.notebook, padding=(0,16))
         self.notebook.add(collection_tab, text='3   Collection & upload')
         self._build_collection(collection_tab)
-        docker_tab = ttk.Frame(self.notebook, padding=(0, 16))
-        self.notebook.add(docker_tab, text='Docker deployment')
-        docker_card = ttk.Frame(docker_tab, style='Card.TFrame', padding=24)
-        docker_card.pack(fill='both', expand=True)
-        ttk.Label(docker_card, text='Collector Docker service', style='Title.TLabel').pack(anchor='w')
-        docker_help = ('This window manages the single Docker Collector. Setup, previews, collection and uploads use its saved configuration.\n'
-                       'Opening this app starts Docker Desktop if needed and resumes an enabled, commissioned Collector.\n'
-                       'Closing this manager leaves the Docker Collector running.\n'
-                       'Stop Collector stops the container normally and retains its queue and credentials.' if self.docker_managed else
-                      'Existing native Windows setups are separate from this Docker deployment.\n'
-                  'Keep Docker Desktop running to use Docker collection.\n'
-                  'Stop an existing native Collector before starting Docker.\n'
-                  'Docker uses its saved container setup and queue; the other pages show the local Windows setup.\n'
-                  'Closing this window leaves the Docker service running.')
-        ttk.Label(docker_card, text=docker_help,
-                  style='Muted.TLabel', wraplength=900).pack(anchor='w', pady=16)
-        self.docker_status = tk.StringVar(self.root, 'Choose Refresh to check the Docker service.')
-        ttk.Label(docker_card, textvariable=self.docker_status, style='Card.TLabel').pack(anchor='w', pady=12)
-        docker_bar = ttk.Frame(docker_card, style='Card.TFrame')
-        docker_bar.pack(fill='x')
-        self.docker_start_button = self._button(docker_bar, 'Start Docker Collector', lambda: self.docker_action('start'), primary=True)
-        self.docker_start_button.pack(side='left', padx=(0, 8))
-        self.docker_stop_button = self._button(docker_bar, 'Stop Docker Collector', lambda: self.docker_action('stop'))
-        self.docker_stop_button.pack(side='left', padx=8)
-        self._button(docker_bar, 'Refresh', lambda: self.docker_action('status')).pack(side='left', padx=8)
         connection_tab.columnconfigure(0, weight=3)
         connection_tab.columnconfigure(1, weight=2)
         connection_tab.rowconfigure(0, weight=1)
@@ -254,7 +254,7 @@ class CollectorWindow:
         health.pack(fill="both", expand=True, pady=(16, 0))
         ttk.Label(health, text="Connection status", style="Title.TLabel").pack(anchor="w")
         ttk.Label(health, textvariable=self.connection_status, style="Card.TLabel",
-                  font=("Segoe UI", 12, "bold"), wraplength=350).pack(anchor="w", pady=(12, 12))
+                  font=(UI_FONT, 12, "bold"), wraplength=350).pack(anchor="w", pady=(12, 12))
         self.test_button = self._button(health, "Test connection", self.test_connection, primary=True)
         self.test_button.pack(anchor="w")
         ttk.Label(health, text="Read-only access · two approved tables.\n\nConfigure automatic collection and delivery on the Collection & upload tab.",
@@ -262,10 +262,9 @@ class CollectorWindow:
 
         self._build_preview(preview_tab)
         footer = self.footer
-        self.progress = ttk.Progressbar(footer, mode="determinate", length=105)
+        self.progress = ttk.Progressbar(footer, mode="determinate", length=96)
         self.progress.pack(side="right", padx=(12, 0))
-        ttk.Label(footer, text=f"v{__version__}", foreground="#627287").pack(side="right", padx=12)
-        ttk.Label(footer, textvariable=self.status, wraplength=860).pack(side="left", fill="x", expand=True)
+        ttk.Label(footer, textvariable=self.status, style='Footer.TLabel', wraplength=860).pack(side="left", fill="x", expand=True)
         self._navigate(0)
 
     def _navigate(self, index):
@@ -335,7 +334,7 @@ class CollectorWindow:
         scrollbar.pack(side='right', fill='y')
         form.columnconfigure(0, weight=1)
         form.columnconfigure(1, weight=1)
-        labels = {'source_id':'Source ID (from server provisioning)', 'generation_id':'Generation ID (from server provisioning)',
+        labels = {'source_id':'Source reference', 'generation_id':'Generation reference',
                   'collection_enabled':'Enable collection', 'marker_verified':'Change marker verified locally',
                   'scan_mode':'Collection mode', 'history_start':'Initial history start (local ISO time)',
                   'history_end':'Initial history end (exclusive local ISO time)', 'all_history':'Approve all initial history',
@@ -347,6 +346,14 @@ class CollectorWindow:
                   'upload_ca_file':'Trusted upload CA file (blank uses public CAs)',
                   'schedule_weekday':'Weekly day (Monday=0, Sunday=6)'}
         for index, name in enumerate(name for name in EDITABLE_FIELDS[9:] if name != 'upload_url'):
+            if name in self.identity_references:
+                row, column = (index//2)*2, index%2
+                caption = ttk.Label(form, text=labels[name], style='Card.TLabel')
+                caption.grid(row=row, column=column, sticky='w', pady=(8, 5))
+                reference = ttk.Label(form, textvariable=self.identity_references[name], style='Card.TLabel')
+                reference.grid(row=row+1, column=column, sticky='w', padx=(0, 18), pady=7)
+                self.fields[name] = (caption, reference)
+                continue
             options = ('True','False') if type(getattr(self.base, name)) is bool else {
                 'scan_mode':('id_range','marker'), 'privacy':('upload_all','omit','hash'), 'schedule_mode':('interval','daily','weekly')}.get(name)
             self._entry(form, name, (index//2)*2, index%2, labels[name], values=options, width=42)
@@ -512,6 +519,9 @@ class CollectorWindow:
         self.loading = True
         for name, variable in self.variables.items():
             variable.set(str(getattr(config, name)))
+        for name, reference in self.identity_references.items():
+            value = getattr(config, name)
+            reference.set('…' + value[-4:] if value else 'Not configured')
         self.preview_limit.set(str(config.preview_rows))
         self.password.set("")
         self.upload_token.set('')
@@ -550,8 +560,6 @@ class CollectorWindow:
         self.details_button.configure(state="normal" if self.records and not self.busy else "disabled")
         self.save_button.configure(state="normal" if not self.busy and self._is_dirty() else "disabled")
         running = self.auto_thread is not None and self.auto_thread.is_alive()
-        self.docker_start_button.configure(state='normal' if not self.busy and not running and self.docker_engine_ready is not False else 'disabled')
-        self.docker_stop_button.configure(state='normal' if not self.busy and self.docker_engine_ready is not False else 'disabled')
         self.collect_button.configure(state='normal' if saved and self.saved.collection_enabled and not self.busy and not running and not self.password.get() else 'disabled')
         self.auto_button.configure(state='normal' if saved and self.saved.collection_enabled and not self.busy and not running else 'disabled')
         self.stop_button.configure(state='normal' if (running and not self.auto_stop.is_set()) or (self.manual_collecting and not self.cycle_stop.is_set()) else 'disabled')
@@ -675,18 +683,17 @@ class CollectorWindow:
 
     def _load(self, path):
         path = Path(path).resolve()
+        self._start("Opening local settings…", lambda: self.service.load(path), self._settings_loaded)
 
-        def loaded(config):
-            self.saved = self.base = config
-            self.config_path = config.path
-            self.connected = False
-            self._clear_preview()
-            self._populate(config)
-            self.connection_status.set("Not tested")
-            self.password_status.set("Saved password available" if self._credential_present('database') else "No saved password")
-            self.status.set("Settings opened. Test the connection before loading a preview.")
-
-        self._start("Opening local settings…", lambda: self.service.load(path), loaded)
+    def _settings_loaded(self, config):
+        self.saved = self.base = config
+        self.config_path = config.path
+        self.connected = False
+        self._clear_preview()
+        self._populate(config)
+        self.connection_status.set("Not tested")
+        self.password_status.set("Saved password available" if self._credential_present('database') else "No saved password")
+        self.status.set("Settings opened. Test the connection before loading a preview.")
 
     def open_settings(self):
         if not self._discard_ok():
@@ -822,7 +829,7 @@ class CollectorWindow:
         window.transient(self.root)
         content = ttk.Frame(window, padding=16)
         content.pack(fill="both", expand=True)
-        ttk.Label(content, text="Preserved source fields and timestamp quality", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 12))
+        ttk.Label(content, text="Preserved source fields and timestamp quality", font=(UI_FONT, 12, "bold")).pack(anchor="w", pady=(0, 12))
         area = ttk.Frame(content)
         area.pack(fill="both", expand=True)
         text = tk.Text(area, wrap="none", font=("Consolas", 10), padx=12, pady=12,

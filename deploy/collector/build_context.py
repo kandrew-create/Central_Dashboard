@@ -5,13 +5,22 @@ import shutil
 
 RUNTIME_FILES = ('.dockerignore', 'deploy/collector/Dockerfile', 'deploy/collector/requirements.lock')
 COMPOSE_FILES = ('deploy/docker-compose.collector.yml', 'deploy/docker-compose.collector.host.yml')
+DESKTOP_FILES = (
+    'deploy/docker-compose.collector.desktop.yml',
+    'deploy/docker-compose.collector.container.yml',
+    'deploy/collector/Dockerfile.desktop', 'deploy/collector/container_gui.py',
+    'deploy/collector/control.py', 'deploy/collector/desktop.py',
+    'deploy/collector/windows_runtime.py', 'deploy/collector/launch-container.sh',
+    'deploy/collector/start-docker-desktop.ps1',
+    'deploy/collector/collector.png',
+)
 
 
 def stage(root, output):
     root, output = Path(root).resolve(), Path(output).resolve()
     if output.exists() and any(output.iterdir()):
         raise ValueError('Use an empty output directory for the Collector Docker context.')
-    files = [root / name for name in (*RUNTIME_FILES, *COMPOSE_FILES)]
+    files = [root / name for name in (*RUNTIME_FILES, *COMPOSE_FILES, *DESKTOP_FILES)]
     for folder in ('collector', 'shared'):
         for path in (root / folder).rglob('*'):
             if (path.is_file() and path.suffix in ('.py', '.toml')

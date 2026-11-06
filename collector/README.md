@@ -112,4 +112,7 @@ Completed server checks, credential storage and collection-status refreshes now 
 
 Version 0.4 supports network destinations exported by Central Server **4 Connection & mode**. **Test server** verifies HTTPS, upload credential and the active source/generation without uploading records or advancing state. Source database testing remains a separate **Test connection** action. Use Local testing for one PC and Network server for collectors on other PCs; setup changes require a fresh local import.
 
-Use the single **SCADA Collector - WSL Docker** Start menu shortcut. Its sidebar manages the same Docker configuration and durable queue throughout. The shortcut installer removes obsolete separate manager shortcuts.
+For the interface and engine entirely in containers, use **SCADA Collector - Docker**
+and the [container desktop guide](../docs/collector-container-desktop.md). The older
+**SCADA Collector - WSL Docker** shortcut uses the native Windows interface with
+a container engine. Both manage the same durable queue; never run duplicate schedulers.
