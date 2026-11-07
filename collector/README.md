@@ -45,10 +45,13 @@ The choice persists as `[source].use_pc_timezone`; its resolved snapshot is save
 in `[source].timezone` and `[schedule].schedule_timezone`. Loading older settings
 or editing unrelated fields preserves any previously different values until a
 timezone choice is made. Reopening and later Windows changes do not silently
-reinterpret history. A source that already collected records needs a reviewed
-new generation before its effective timezone changes; a rejected save retains
-settings and queued data. Original timestamps and separate milliseconds remain
-preserved; a blank saved zone remains unknown, regardless of Docker's clock.
+reinterpret history. The first change from Unknown to a confirmed zone can be
+saved without a new generation. At the next successful source preflight, the
+Collector records each table's current maximum ID: existing IDs retain Unknown,
+including later updates, while new IDs above that boundary use the chosen zone.
+Queued payloads, checkpoints and existing server records remain unchanged.
+Changing an already-known zone still requires a reviewed new generation.
+Original timestamps and separate milliseconds remain preserved.
 Existing uploads are not corrected by reopening the interface. See
 [timezone and daily reporting](../docs/collector-container-desktop.md#refresh-and-windows-timezone--7-november-2026).
 
@@ -80,7 +83,7 @@ Consecutive unchanged content is skipped. A return to a previously observed valu
 
 Queue and state quotas plus minimum free space stop new staging while retaining pending work. Seen-content identities are retained for deduplication and count toward disk usage. Review capacity/retention before a long installation. Never delete queue/state files to clear a fault.
 
-Default collection preserves all approved operator fields under `upload_all`. `omit` excludes the personal fields from transmitted records; `hash` replaces non-NULL personal values with keyed HMAC-SHA256. Store the hashing key with `set-privacy-key`; keep key ownership and rotation under local maintenance. Changing collection identity, timezone, history scope or privacy policy requires a reviewed new generation/setup. Local previews still omit operator fields unless explicitly selected.
+Default collection preserves all approved operator fields under `upload_all`. `omit` excludes the personal fields from transmitted records; `hash` replaces non-NULL personal values with keyed HMAC-SHA256. Store the hashing key with `set-privacy-key`; keep key ownership and rotation under local maintenance. Changing collection identity, an already-known timezone, history scope or privacy policy requires a reviewed new generation/setup. The first confirmed timezone may be assigned prospectively as described above. Local previews still omit operator fields unless explicitly selected.
 
 HTTPS uses certificate/hostname verification, fixed locally configured URLs, no redirects or HTTP fallback, and bounded uncompressed JSON receipts. Proxy environment variables are ignored. Authentication/schema/receipt faults use a one-hour retry delay; transient transport faults use bounded exponential backoff. Rotating local logs contain counts and redacted faults, not passwords, raw records or operator text. The collector opens no listener and accepts no cloud commands or configuration.
 

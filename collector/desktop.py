@@ -134,13 +134,16 @@ class DesktopService:
                     and previous.state_path.is_file()):
                 try:
                     with closing(sqlite3.connect(previous.state_path.as_uri() + '?mode=ro', uri=True)) as db:
-                        bound = db.execute("SELECT 1 FROM meta WHERE key='binding'").fetchone()
-                except sqlite3.Error:
+                        row = db.execute("SELECT value FROM meta WHERE key='binding'").fetchone()
+                        bound = json.loads(row[0]) if row else None
+                except (sqlite3.Error, ValueError):
                     raise CollectorError('Cannot review existing source state. Settings and queue were retained.') from None
                 if bound:
-                    raise CollectorError('This source already collected records with its saved timezone. '
-                                         'Apply a provisioned new generation before saving a different source timezone. '
-                                         'Original settings, checkpoints and pending uploads were retained.')
+                    from collector.collection import binding
+                    from collector.timezone_policy import first_assignment
+                    if not first_assignment(bound, binding(config)):
+                        raise CollectorError('Changing an already-known timezone requires a provisioned new generation. '
+                                             'Original settings, checkpoints and pending uploads were retained.')
             if config.path.is_symlink():
                 raise CollectorError("Settings files must not be symbolic links.")
             secrets.write_private_file(config.path, content.encode("utf-8"))
@@ -156,8 +159,19 @@ class DesktopService:
 
     def preview(self, config, table, limit, after_id=None, include_user_fields=False):
         require_current(config)
-        return self._reader(config).preview(
+        prior, policy = None, None
+        if config.state_path.is_file():
+            try:
+                with closing(sqlite3.connect(config.state_path.as_uri() + '?mode=ro', uri=True)) as db:
+                    saved = {key: json.loads(value) for key, value in db.execute(
+                        "SELECT key,value FROM meta WHERE key IN ('binding','timezone_policy')")}
+                prior, policy = saved.get('binding'), saved.get('timezone_policy')
+            except (sqlite3.Error, ValueError):
+                raise CollectorError('Cannot review saved timestamp policy; existing state was retained.') from None
+        records = self._reader(config).preview(
             table, after_id=after_id, limit=limit, include_user_fields=include_user_fields)
+        from collector.timezone_policy import preserve_preview_history
+        return preserve_preview_history(config, prior, policy, records)
 
     @staticmethod
     def _reader(config):

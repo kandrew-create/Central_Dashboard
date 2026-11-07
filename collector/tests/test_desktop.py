@@ -57,7 +57,7 @@ class SourceTimezoneSaveTests(unittest.TestCase):
         from collector.state import State
         with tempfile.TemporaryDirectory() as folder:
             service = DesktopService()
-            config = service.save(default_config(Path(folder) / 'setup/config.toml'))
+            config = service.save(replace(default_config(Path(folder) / 'setup/config.toml'), timezone='UTC'))
             state = State(config)
             state.put('binding', binding(config))
             state.close()
@@ -66,6 +66,21 @@ class SourceTimezoneSaveTests(unittest.TestCase):
             with self.assertRaisesRegex(CollectorError, 'provisioned new generation'):
                 service.save(replace(config, timezone='America/New_York', use_pc_timezone=True), config)
             self.assertEqual(config.path.read_bytes(), original_config)
+            self.assertEqual(config.state_path.read_bytes(), original_state)
+
+    def test_first_known_timezone_can_save_without_changing_existing_state(self):
+        from collector.collection import binding
+        from collector.state import State
+        with tempfile.TemporaryDirectory() as folder:
+            service = DesktopService()
+            config = service.save(default_config(Path(folder) / 'setup/config.toml'))
+            state = State(config)
+            state.put('binding', binding(config))
+            state.close()
+            original_state = config.state_path.read_bytes()
+            updated = service.save(replace(config, timezone='America/New_York', use_pc_timezone=True,
+                                           schedule_timezone='America/New_York'), config)
+            self.assertEqual(updated.timezone, 'America/New_York')
             self.assertEqual(config.state_path.read_bytes(), original_state)
 
     def test_uncollected_setup_can_save_pc_local_choice_and_later_choose_manual(self):

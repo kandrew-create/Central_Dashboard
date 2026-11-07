@@ -89,6 +89,46 @@ class DeliveryIntegrationTests(PostgresCase):
     def post(self,batch,token=None):
         return self.api.post('/v1/uploads',json=batch,headers={'Authorization':'Bearer '+(token or self.token)})
 
+    def test_first_timezone_assignment_preserves_old_receipts_and_dates_only_new_occurrences(self):
+        from collector.tests.test_timezone_policy import MemorySource, source_row
+        from server.management.alarm_analysis import report
+        with tempfile.TemporaryDirectory() as folder:
+            config = replace(default_config(Path(folder) / 'config.toml'), source_id=uid(6), generation_id=uid(7),
+                             collection_enabled=True, all_history=True, min_free_bytes=0)
+            state = State(config)
+            source = MemorySource()
+            try:
+                collect(config, source, state)
+                original_bytes = state.pending()['payload']
+                original_batch = json.loads(original_bytes)
+                original_reply = self.post(original_batch)
+                self.assertEqual(original_reply.status_code, 200)
+                state.confirm(original_reply.json())
+                self.assertTrue(work_once(self.worker))
+                known = replace(config, timezone='America/New_York', schedule_timezone='America/New_York')
+                source.rows['alarmhistory'].append(source_row(2))
+                collect(known, source, state)  # ID 2 already existed at cutover.
+                source.rows['alarmhistory'].append(source_row(3))
+                collect(known, source, state)  # ID 3 is new after cutover.
+                while state.pending():
+                    batch = json.loads(state.pending()['payload'])
+                    reply = self.post(batch)
+                    self.assertEqual(reply.status_code, 200)
+                    state.confirm(reply.json())
+                    self.assertTrue(work_once(self.worker))
+                self.assertEqual(self.post(original_batch).json(), original_reply.json())
+                self.assertEqual(self.scalar(f"SELECT count(*) FROM platform.source_generations WHERE source_id='{uid(6)}'"), '1')
+                self.assertEqual(self.scalar("SELECT count(*) FROM platform.alarm_event_revisions WHERE source_record_id IN (1,2) AND source_timezone='' AND start_time_quality='timezone_unknown'"), '2')
+                self.assertEqual(self.scalar("SELECT source_timezone||'|'||start_time_quality FROM platform.alarm_event_revisions WHERE source_record_id=3"), 'America/New_York|known')
+                with psycopg.connect(dbname=self.database, row_factory=dict_row) as db:
+                    result = report(db, days=0, customer_id=uid(1))
+                self.assertEqual(result['summary']['occurrences'], 3)
+                self.assertEqual(result['summary']['uncertain_time'], 2)
+                self.assertEqual(result['daily'], [dict(day='2026-11-07', occurrences=1)])
+                self.assertEqual(json.loads(original_bytes)['records'][0]['timezone'], '')
+            finally:
+                state.close()
+
     def test_upload_replay_and_processing_continue_after_removing_legacy_copies(self):
         from alembic import command
         from alembic.config import Config

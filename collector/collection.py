@@ -7,6 +7,7 @@ from collector.config import TABLES
 from collector.errors import CollectorError
 from collector.records import PERSONAL_FIELDS
 from collector.secrets import load_password
+from collector.timezone_policy import first_assignment, activate, record_timezone
 from shared.protocol import marker
 
 
@@ -15,7 +16,7 @@ def binding(config):
             'source_id', 'generation_id', 'timezone', 'privacy', 'marker_verified', 'scan_mode', 'history_start', 'history_end', 'all_history')}
 
 
-def wire_record(config, table, row):
+def wire_record(config, table, row, timezone_name=None):
     original = {k: v.isoformat(timespec='microseconds') if isinstance(v, datetime) else v for k, v in row.items()}
     if config.privacy == 'omit':
         original = {k: v for k, v in original.items() if k not in PERSONAL_FIELDS[table]}
@@ -27,7 +28,7 @@ def wire_record(config, table, row):
         for name in PERSONAL_FIELDS[table]:
             if original[name] is not None:
                 original[name] = 'hmac-sha256:' + hmac.new(key, original[name].encode(), hashlib.sha256).hexdigest()
-    return dict(table=table, original=original, timezone=config.timezone,
+    return dict(table=table, original=original, timezone=config.timezone if timezone_name is None else timezone_name,
                 ordering_uncertain=not config.marker_verified or marker(original) is None)
 
 
@@ -41,7 +42,9 @@ def preflight(config, reader, state):
     if not config.all_history and not (config.history_start and config.history_end):
         raise CollectorError('Approve an initial history date range or explicitly select all history.')
     previous_binding = state.get('binding')
-    if previous_binding and previous_binding != binding(config):
+    current_binding = binding(config)
+    prospective_timezone = first_assignment(previous_binding, current_binding)
+    if previous_binding and previous_binding != current_binding and not prospective_timezone:
         raise CollectorError('Source identity or collection policy changed. Authorize a new generation/setup locally; pending work was retained.')
     if state.get('reset_fault'):
         raise CollectorError('Source reset/gap fault is latched. Authorize a new generation locally before continuing.')
@@ -60,6 +63,8 @@ def preflight(config, reader, state):
                 with state.transaction():
                     state.put('reset_fault', True)
                 raise CollectorError('Source changed or IDs regressed during a bounded cycle; local review is required.')
+    if prospective_timezone:
+        activate(config, state, observed, current_binding)
     return observed
 
 
@@ -83,6 +88,7 @@ def collect(config, reader, state, observed=None, stop=None):
                 state.put('reset_fault', True)
             raise CollectorError('Source relation changed during a collection cycle; local review is required.')
     staged = pages = 0
+    timezone_policy = state.get('timezone_policy')
     while pages < config.max_pages and progress['cycle']:
         if stop and stop.is_set():
             break
@@ -103,7 +109,8 @@ def collect(config, reader, state, observed=None, stop=None):
         history = {'start':config.history_start, 'end':config.history_end,
                    'initial_high':progress['initial_high_ids'][table]} if not config.all_history else None
         rows = reader.scan_page(table, phase, bound, cursor, lower, history)
-        records = [wire_record(config, table, row) for row in rows]
+        records = [wire_record(config, table, row,
+                    record_timezone(config, timezone_policy, table, row['id'])) for row in rows]
         if rows:
             row = rows[-1]
             cycle['cursor'] = [row['last_update'].isoformat(timespec='microseconds'), row['last_update_ms'], row['id']] if phase == 'marker' else row['id']

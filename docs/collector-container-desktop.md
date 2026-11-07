@@ -211,25 +211,24 @@ requires a valid captured zone. Loading settings does not recapture Windows or
 align legacy different zones automatically; unrelated edits preserve them until
 the operator makes a timezone choice.
 
-Before writing settings, a read-only SQLite binding check rejects a changed
-effective timezone in an already-collected generation. It retains the original
-configuration, queue, IDs and checkpoints and reports the need for a provisioned
-new generation. Newly configured/uncollected setups may save the choice; changing
-PC/manual mode while retaining the same effective timezone does not reinterpret
-records. Neither Docker's timezone nor a display preference guesses timestamps
-or rewrites existing uploads.
+Before writing settings, a read-only SQLite binding check rejects changes to an
+already-known timezone without a provisioned new generation. The first Unknown
+to confirmed assignment is allowed when all other identity/collection-policy
+binding fields match. Newly configured/uncollected setups may save a known zone;
+switching PC/custom mode while keeping the same zone does not reinterpret data.
+Neither Docker's clock nor a display preference guesses or rewrites timestamps.
 
 Station2's Windows timezone is **Eastern Standard Time → America/New_York**.
-The operator confirmed SCADA uses that PC's Windows local time, but its assigned
-Collector currently has a blank source timezone. Those timestamps remain
+The operator confirmed SCADA uses that PC's Windows local time. Before the
+prospective cutover, its assigned Collector had a blank source timezone. Those
+historical timestamps remain
 `timezone_unknown`, with no guessed UTC value. Central daily alarm reporting
 groups known occurrence dates in **UTC days** and omits NULL dates from the daily
 series. This explains how saved alarms can remain visible in totals while absent
 from the daily chart; missing/ambiguous start times, reporting lag and filters can
 also affect the result. A Windows/Docker display change does not repair historical
-unknown dates. Correcting an assigned source and any historical interpretation
-requires a separate reviewed Central/source-generation procedure; it was not
-performed during this interface update.
+unknown dates. Historical reinterpretation requires separate review; the
+prospective policy below deliberately leaves old timestamps unchanged.
 
 Verification passed 84 focused Windows tests with one display-related skip, plus
 73 checks in the actual Linux candidate desktop image without skips. Coverage
@@ -259,6 +258,52 @@ differences on load/unrelated edits and displaying custom-zone next-run times.
 The rendered selected indicator was visually verified as a tick. The interface
 was installed after normal closure, with matching stopped data/key fingerprints
 and the existing schedule resumed. Saved timezone interpretation remains intact.
+
+### Prospective first timezone assignment
+
+The initial blanket generation requirement prevented continued collection when
+the first verified timezone became known. The operator requested that old data
+stay unknown while new data uses the chosen timezone. Saving the first confirmed
+zone is now supported in the existing source/generation; it does not reset seen
+hashes, extraction progress or the queue.
+
+At the next successful preflight, the existing read-only source bounds provide a
+separate maximum-ID cutoff for each approved table. Reset/gap and relation checks
+must pass first. A single SQLite transaction commits the cutoff policy and new
+binding. A fault rolls both back; restarting reuses the durable policy. Rows at
+or below each cutoff retain the prior unknown timezone, including uncollected
+historical rows and later revisions. Rows above it use the new zone. An empty
+table has no historical IDs. Inserts behind the cutoff stay unknown
+conservatively; ID reuse/reset is not treated as a new occurrence. A reviewed new
+generation remains necessary for changing an already-known zone or other bound
+collection policies.
+
+The policy is stored in the existing SQLite `meta` table as `timezone_policy`,
+including the generation, activation time, zones and per-table cutoffs. Preserve
+it with the complete Collector state during backup/migration; deleting it would
+lose the historical boundary. Previews apply the same historical uncertainty,
+including the interval after settings save but before activation. Pending batches
+keep their exact bytes, IDs and hashes. Old Central revisions/receipts are not
+edited, and unchanged historical rows are not resent merely to attach a zone.
+No upload protocol change or Central migration is required.
+
+Verification: **174 Windows Collector tests passed**, with 32 Linux-only or
+explicitly disabled PostgreSQL checks skipped there; **91 Linux desktop checks
+passed**, with five Windows-only skips; **91 disposable PostgreSQL 17 source,
+queue, ingestion and warehouse checks passed**, with two Windows-only skips.
+End-to-end coverage verifies old unknown records and immutable receipts, a new
+known occurrence under the same generation and a daily count containing only
+that dated occurrence. Fault injection verifies atomic cutoff/binding rollback,
+restart behavior and retained reset protections. Disposable test resources were
+removed; no operational/source database was used as a test cluster.
+
+On Station2, installed code replacement preserved both stopped volume
+fingerprints. The confirmed PC-local America/New_York choice was then saved and
+activated using read-only source bounds. Queue bytes, other metadata/checkpoints,
+generation history and source/generation IDs were verified unchanged at the
+cutover. The previous schedule resumed, and an actual collection completed after
+activation with zero pending batches and no reported error. New live source-ID
+delivery and reboot recovery were not manufactured or newly commissioned.
 
 ## Local removal — 6 November 2026
 

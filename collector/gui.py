@@ -787,7 +787,10 @@ class CollectorWindow:
             self._populate(result)
             self.password_status.set("Saved password available" if self._credential_present('database') else "No saved password")
             self.connection_status.set("Not tested")
-            self.status.set("Settings saved. Store a password, then test the connection.")
+            if previous and not previous.timezone and result.timezone:
+                self.status.set('Settings saved. The timezone will apply to new record IDs; existing records keep unknown timezones.')
+            else:
+                self.status.set("Settings saved. Store a password, then test the connection.")
 
         self._start("Saving local settings…", lambda: self.service.save(config, previous), saved)
 
