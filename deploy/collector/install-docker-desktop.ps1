@@ -27,6 +27,15 @@ $shortcut.WorkingDirectory = $installRoot
 $shortcut.IconLocation = (Join-Path $installRoot 'collector.ico') + ',0'
 $shortcut.Description = 'SCADA Collector interface and runtime in Linux Docker containers'
 $shortcut.Save()
+$legacyShortcut = Join-Path $shortcutFolder 'SCADA Collector - WSL Docker.lnk'
+if (Test-Path -LiteralPath $legacyShortcut -PathType Leaf) {
+    Copy-Item -LiteralPath $legacyShortcut -Destination (Join-Path $installRoot 'previous-windows-launcher.lnk')
+    Remove-Item -LiteralPath $legacyShortcut
+}
 $desktopShortcut = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'SCADA Collector - Docker.lnk'
-Copy-Item -LiteralPath (Join-Path $shortcutFolder 'SCADA Collector - Docker.lnk') -Destination $desktopShortcut -Force
+try {
+    Copy-Item -LiteralPath (Join-Path $shortcutFolder 'SCADA Collector - Docker.lnk') -Destination $desktopShortcut -Force
+} catch [System.UnauthorizedAccessException] {
+    Write-Warning 'The desktop folder does not allow shortcut creation. Open SCADA Collector - Docker from Start or Launch Collector.cmd.'
+}
 Write-Output ('Installed Docker-only Collector desktop: ' + $installRoot)

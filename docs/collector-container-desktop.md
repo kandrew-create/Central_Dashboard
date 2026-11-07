@@ -59,6 +59,11 @@ Docker** shortcuts in Start and on the desktop. Each installation uses a fresh
 directory under `%LOCALAPPDATA%\Linker\Collector\docker-desktop`. Earlier packages
 and all data/key volumes remain intact. Building requires access to Debian,
 Docker Hub and the Python package index; normal launch uses installed images.
+The former **SCADA Collector - WSL Docker** Start menu shortcut is archived in
+the new installation directory and removed from Start, so it cannot reopen the
+Windows interface against an unrelated native profile. If Windows denies desktop
+shortcut creation, installation reports a warning; use the Start menu shortcut or
+**Launch Collector.cmd**. Desktop folder permissions are retained.
 
 Open the shortcut. The launcher starts an already-installed Docker Desktop if
 necessary, starts WSLg, and opens only the `desktop` service in `linker-collector`.
@@ -107,6 +112,38 @@ the Docker interface. At that time, removal of the old native Windows package wa
 awaiting Windows administrator/UAC approval; it completed on 6 November as noted
 below. Cold Docker startup and reboot recovery were not tested by interrupting
 other local projects.
+
+## Station2 Docker desktop update — 6 November 2026
+
+Station2 was updated from `28ddcf7` to `8495d9b` with a clean fast-forward pull.
+Its existing Docker Collector already held the migrated source ending `633b`
+and generation ending `a25a`, with both database and upload credentials present.
+The old Windows shortcut opened a different native profile without a migration
+marker and correctly triggered the migration guard. No second migration was
+applied and no profile identity was replaced.
+
+The existing scheduler was stopped normally. Ubuntu was installed into the
+existing WSL 2 environment for WSLg, selected as the default distribution and
+enabled in Docker Desktop integration. The separate desktop and Collector
+runtime images were built from the allowlisted context. **SCADA Collector -
+Docker** in Start and **Launch Collector.cmd** open the Linux container interface;
+the former Windows shortcut is archived. Windows denied desktop shortcut creation,
+so the installer now warns while retaining the working Start launcher.
+
+The desktop window was detected as **SCADA Collector - Linux Docker (Ubuntu)**.
+Its container runs as `10001:10001`, with a read-only filesystem, no network and
+no published ports. Before/after fingerprints matched for all 12 files in the
+data volume and the one encryption-key file. Native profiles and their queues
+remain preserved. Collection remains stopped and opening the interface does not
+start it.
+
+Focused Windows checks passed **55 tests**, with one display-related skip.
+The actual Linux desktop image passed **44 GUI/routing/recovery checks** without
+skips using mocks and disposable profiles. Collector Compose validation and
+PowerShell installer syntax validation passed. PostgreSQL integration, source
+connection, HTTPS credential validity, live delivery and reboot recovery were
+not tested as part of this desktop update. Private build logs and fingerprints
+remain under ignored `.tools/`.
 
 ## Local removal — 6 November 2026
 
