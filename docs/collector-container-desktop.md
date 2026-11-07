@@ -173,6 +173,57 @@ original setup. Data/key fingerprints matched before and after. The operational
 scheduler remains stopped; live source delivery and reboot recovery remain
 unverified. Private diagnostics and disposable check helpers remain in `.tools/`.
 
+## Refresh and Windows timezone — 7 November 2026
+
+The previous interface queried Docker status every 10 seconds. **Collection &
+upload → Status refresh (minutes)** now persists in `[interface]` as
+`status_refresh_minutes`: default 1, maximum 1440, or 0 for manual refresh.
+Save settings to apply it. The timer is rearmed when saved settings load; dirty
+forms and busy operations defer automatic reads. Manual refresh stays available.
+This preference does not change collection intervals, upload scheduling, source
+identity or extraction progress. Older configurations default to 1 minute without
+needing a rewrite.
+
+The Windows launcher uses the installed ICU mapping to translate the Windows
+timezone into an IANA name and passes both names to the desktop container through
+WSL environment variables. Next-run display uses that zone explicitly, including
+daylight-saving rules; it does not depend on the container's system timezone.
+Missing/invalid detection falls back to the saved schedule timezone for display.
+Windows with daylight-saving adjustment disabled is left undetected rather than
+assuming ordinary IANA rules. No source or schedule setting is changed on launch.
+The mapping uses [ICU's Windows timezone conversion](https://unicode-org.github.io/icu-docs/apidoc/dev/icu4c/ucal_8h.html).
+
+**Use Windows zone for schedule** explicitly fills the schedule form. **Use
+Windows zone for source** fills a new source's form only when the operator has
+verified that SCADA writes Windows local timestamps. An assigned source with a
+different/blank source zone shows a review message without changing it. The source
+timezone is part of the existing generation's binding; switching it requires a
+reviewed new generation. Neither Docker's timezone nor a display preference is
+used to guess source timestamps or rewrite existing uploads.
+
+Station2's Windows timezone is **Eastern Standard Time → America/New_York**.
+The operator confirmed SCADA uses that PC's Windows local time, but its assigned
+Collector currently has a blank source timezone. Those timestamps remain
+`timezone_unknown`, with no guessed UTC value. Central daily alarm reporting
+groups known occurrence dates in **UTC days** and omits NULL dates from the daily
+series. This explains how saved alarms can remain visible in totals while absent
+from the daily chart; missing/ambiguous start times, reporting lag and filters can
+also affect the result. A Windows/Docker display change does not repair historical
+unknown dates. Correcting an assigned source and any historical interpretation
+requires a separate reviewed Central/source-generation procedure; it was not
+performed during this interface update.
+
+Verification passed 84 focused Windows tests with one display-related skip, plus
+73 checks in the actual Linux candidate desktop image without skips. Coverage
+includes minute persistence/validation, manual mode, dirty-form deferral,
+historical DST display and protection against implicit source-zone changes.
+The real Windows mapping and launcher syntax passed. The user closed the previous
+window; the selected running scheduler was stopped normally for code replacement
+and its saved schedule resumed. Data/key fingerprints matched while stopped.
+The reopened interface reported the Windows zone, 1-minute refresh and unchanged
+blank source/UTC schedule settings. No source database or Central schema was
+changed; no PostgreSQL integration or historical repair was performed.
+
 ## Local removal — 6 November 2026
 
 The user selected this development PC for Docker Central Server and a separate

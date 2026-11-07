@@ -12,7 +12,8 @@ EDITABLE_FIELDS = ("host", "port", "database", "user", "sslmode", "timezone",
                    "schema", "alarm_table", "event_table", "source_id", "generation_id", "collection_enabled",
                    "marker_verified", "scan_mode", "history_start", "history_end", "all_history", "page_rows", "max_pages",
                    "overlap_seconds", "reconcile_ids", "queue_bytes", "min_free_bytes", "privacy", "upload_url", "upload_enabled",
-                   "interval_seconds", "schedule_mode", "schedule_timezone", "schedule_time", "schedule_weekday", "upload_ca_file")
+                   "interval_seconds", "schedule_mode", "schedule_timezone", "schedule_time", "schedule_weekday", "upload_ca_file",
+                   "status_refresh_minutes")
 
 COLLECTION_FIELDS = EDITABLE_FIELDS[9:24]
 UPLOAD_FIELDS = ('upload_url', 'upload_enabled', 'upload_ca_file')
@@ -38,6 +39,7 @@ def config_document(config):
         "collection": {name: getattr(config, name) for name in COLLECTION_FIELDS},
         "upload": {name: getattr(config, name) for name in UPLOAD_FIELDS},
         "schedule": {name: getattr(config, name) for name in SCHEDULE_FIELDS},
+        "interface": {"status_refresh_minutes": config.status_refresh_minutes},
     }
 
 

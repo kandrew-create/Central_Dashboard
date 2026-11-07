@@ -16,6 +16,46 @@ from deploy.collector.desktop import DockerDesktopService
 
 @unittest.skipIf(tk is None, 'Tk is not installed')
 class DockerManagerWindowTests(unittest.TestCase):
+    def test_saved_refresh_minutes_rearm_and_manual_mode_cancels_timer(self):
+        self.app.saved = self.app.base = replace(self.config, status_refresh_minutes=5)
+        self.app._populate(self.app.saved)
+        first_timer = self.app.status_poll
+        self.assertTrue(first_timer)
+        with patch.object(self.root, 'after', wraps=self.root.after) as after:
+            self.app._schedule_status_poll()
+        self.assertEqual(after.call_args.args[0], 300000)
+        self.assertNotEqual(self.app.status_poll, first_timer)
+        self.app.saved = self.app.base = replace(self.config, status_refresh_minutes=0)
+        self.app._populate(self.app.saved)
+        self.assertIsNone(self.app.status_poll)
+        self.service.status.reset_mock()
+        self.app.refresh_collection_status()
+        self.wait_idle()
+        self.service.status.assert_called_once()
+        self.service.start.assert_not_called()
+
+    def test_unsaved_edits_block_periodic_read_without_starting_collection(self):
+        self.app.variables['host'].set('unsaved.example')
+        self.service.status.reset_mock()
+        self.app._periodic_status()
+        self.service.status.assert_not_called()
+        self.service.start.assert_not_called()
+
+    def test_detected_windows_zone_is_explicit_and_cannot_replace_assigned_source_zone(self):
+        with patch.dict('os.environ', COLLECTOR_WINDOWS_TIMEZONE='America/New_York'):
+            self.app._use_windows_timezone('schedule_timezone')
+            self.assertEqual(self.app.variables['schedule_timezone'].get(), 'America/New_York')
+            self.assertEqual(self.app.variables['timezone'].get(), '')
+            self.app.saved = replace(self.config, source_id='11111111-1111-4111-8111-111111111111')
+            with patch('collector.docker_gui.messagebox.showinfo') as info:
+                self.app._use_windows_timezone('timezone')
+            info.assert_called_once()
+            self.assertEqual(self.app.variables['timezone'].get(), '')
+            self.service.save.assert_not_called()
+            self.app.saved = self.config
+            self.app._use_windows_timezone('timezone')
+            self.assertEqual(self.app.variables['timezone'].get(), 'America/New_York')
+
     def test_identity_references_are_read_only_and_save_preserves_full_ids(self):
         for name in ('source_id', 'generation_id'):
             self.assertEqual(self.app.identity_references[name].get(), 'Not configured')

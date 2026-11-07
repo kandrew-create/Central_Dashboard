@@ -2,12 +2,49 @@
 from pathlib import Path
 import sys
 import tkinter as tk
+from tkinter import ttk, messagebox
 
 from collector.gui import CollectorWindow
 from deploy.collector.desktop import DockerDesktopService
+from collector.time_display import windows_timezone
 
 
 class DockerCollectorWindow(CollectorWindow):
+    def _build_collection(self, parent):
+        super()._build_collection(parent)
+        card = parent.winfo_children()[0]
+        bar = ttk.Frame(card, style='Card.TFrame')
+        bar.pack(fill='x', before=card.winfo_children()[1], pady=6)
+        self.timezone_summary = tk.StringVar(self.root)
+        ttk.Label(bar, textvariable=self.timezone_summary, style='Muted.TLabel', wraplength=1000).pack(anchor='w')
+        for field, caption in (('schedule_timezone', 'Use Windows zone for schedule'),
+                               ('timezone', 'Use Windows zone for source')):
+            button = self._button(bar, caption, lambda selected=field: self._use_windows_timezone(selected))
+            button.pack(side='left', padx=(0, 8), pady=4)
+        self._update_timezone_summary()
+
+    def _update_timezone_summary(self):
+        if hasattr(self, 'timezone_summary'):
+            self.timezone_summary.set('Windows timezone: ' + (windows_timezone() or 'Unavailable') +
+                                      ' | Source timezone for uploads: ' + (self.variables['timezone'].get() or 'Unknown'))
+
+    def _use_windows_timezone(self, field):
+        name = windows_timezone()
+        if not name:
+            self.status.set('Windows timezone could not be detected. Enter the verified IANA timezone explicitly.')
+            return
+        if field == 'timezone' and self.saved and self.saved.source_id and self.saved.timezone != name:
+            messagebox.showinfo('Source timezone review',
+                                'Windows uses ' + name + '. This existing source needs a reviewed new generation '
+                                'before changing timestamp interpretation. Existing uploads remain unchanged.', parent=self.root)
+            return
+        self.variables[field].set(name)
+        self.status.set('Windows timezone selected. Save settings to apply it.')
+
+    def _form_changed(self, *args):
+        super()._form_changed(*args)
+        self._update_timezone_summary()
+
     def __init__(self, root, config_path, service=None, auto_start=False):
         super().__init__(root, config_path, service or DockerDesktopService(config_path), load_on_open=not auto_start)
         if not auto_start and not self.busy and self.saved is None:
@@ -36,12 +73,24 @@ class DockerCollectorWindow(CollectorWindow):
             self.status_poll = self.root.after(200, self._initial_status)
         else:
             self.refresh_collection_status()
-            self.status_poll = self.root.after(10000, self._periodic_status)
+            self._schedule_status_poll()
+
+    def _schedule_status_poll(self):
+        if getattr(self, 'status_poll', None) is not None:
+            self.root.after_cancel(self.status_poll)
+        minutes = (self.saved or self.base).status_refresh_minutes
+        self.status_poll = self.root.after(minutes * 60000, self._periodic_status) if minutes else None
+
+    def _populate(self, config):
+        super()._populate(config)
+        self._update_timezone_summary()
+        if hasattr(self, 'status_poll'):
+            self._schedule_status_poll()
 
     def _periodic_status(self):
         if not self.busy and not self._is_dirty() and not self.password.get() and not self.upload_token.get():
             self.refresh_collection_status()
-        self.status_poll = self.root.after(10000, self._periodic_status)
+        self._schedule_status_poll()
 
     def _refresh_actions(self):
         super()._refresh_actions()
@@ -133,7 +182,7 @@ class DockerCollectorWindow(CollectorWindow):
     def _destroy(self):
         if hasattr(self, 'startup_id'):
             self.root.after_cancel(self.startup_id)
-        if hasattr(self, 'status_poll'):
+        if getattr(self, 'status_poll', None) is not None:
             self.root.after_cancel(self.status_poll)
         super()._destroy()
 

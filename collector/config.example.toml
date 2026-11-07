@@ -52,3 +52,7 @@ schedule_mode = "interval"
 schedule_timezone = "UTC"
 schedule_time = "02:00"
 schedule_weekday = 0
+
+[interface]
+# Status display only. Zero disables automatic refresh.
+status_refresh_minutes = 1

@@ -8,6 +8,25 @@ from collector.errors import CollectorError
 
 
 class ConfigTests(unittest.TestCase):
+    def test_refresh_preference_defaults_for_old_config_and_does_not_change_collection_binding(self):
+        from dataclasses import replace
+        from collector.collection import binding
+        from collector.desktop import serialize_config
+        old = self.load(EXAMPLE.split('[interface]')[0])
+        self.assertEqual(old.status_refresh_minutes, 1)
+        for minutes in (0, 5, 1440):
+            candidate = replace(old, status_refresh_minutes=minutes)
+            loaded = self.load(serialize_config(candidate))
+            self.assertEqual(loaded.status_refresh_minutes, minutes)
+            self.assertEqual(binding(loaded), binding(old))
+            self.assertEqual(loaded.interval_seconds, old.interval_seconds)
+            self.assertEqual(loaded.schedule_timezone, old.schedule_timezone)
+
+    def test_refresh_preference_rejects_invalid_minutes(self):
+        for value in ('-1', '1441', 'true', '1.5'):
+            with self.subTest(value=value), self.assertRaises(CollectorError):
+                self.load(EXAMPLE.replace('status_refresh_minutes = 1', 'status_refresh_minutes = ' + value))
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

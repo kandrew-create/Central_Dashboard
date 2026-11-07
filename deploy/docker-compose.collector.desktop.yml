@@ -19,6 +19,8 @@ services:
     logging: {driver: none}
     environment:
       DISPLAY: ':0'
+      COLLECTOR_WINDOWS_TIMEZONE_ID: ${COLLECTOR_WINDOWS_TIMEZONE_ID:-}
+      COLLECTOR_WINDOWS_TIMEZONE: ${COLLECTOR_WINDOWS_TIMEZONE:-}
     volumes:
       - type: bind
         source: /var/run/docker.sock

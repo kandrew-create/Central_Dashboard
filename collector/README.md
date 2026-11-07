@@ -30,7 +30,17 @@ The shortcut and Windows GUI share the explicit application identity `Linker.SCA
 2. In **Alarm & event preview**, choose **Alarms** or **Events** and click **Load preview**. It verifies the saved database connection and read-only permissions automatically before reading the bounded sample; a separate **Test connection** remains available on **Connection & setup**. **Test server** checks HTTPS upload authentication and does not enable database previews. Save database edits and store any newly entered database password first. Original strings, codes, flags, nullable times and separate milliseconds are preserved. Timezone selection is available in the GUI; unknown, ambiguous and invalid times are flagged without guessed UTC.
 3. On **Collection & upload**, enter the provisioned source/generation IDs and locally approve an initial date range or all history. Choose the privacy policy, resource limits and schedule. Enable collection and save settings.
 4. Import the encrypted Central Server setup to supply its HTTPS destination, upload credential and CA. The fixed URL has no visible editor and Test server does not echo it. Stored keys stay encrypted and hidden; a manually supplied replacement credential uses a masked entry that is cleared after storage. Certificate/hostname verification remains enabled. Save settings and use **Test server** on the actual Collector PC.
-5. Use **Start Collector** to run the saved Docker schedule. **Stop Collector** stops that container normally after bounded work, retaining pending uploads. With it stopped, **Collect now** runs one bounded Docker cycle using the same configuration and queue. Status refreshes while the manager is idle; **Refresh status** is also available. Closing the GUI leaves the scheduled container running. Closing during a manual one-off requests cancellation and waits for bounded work to finish.
+5. Use **Start Collector** to run the saved Docker schedule. **Stop Collector** stops that container normally after bounded work, retaining pending uploads. With it stopped, **Collect now** runs one bounded Docker cycle using the same configuration and queue. On **Collection & upload**, set **Status refresh (minutes)** and save: the default is 1 minute, 0 selects manual refresh, and the maximum is 1440. This changes only the status display; the collection/upload schedule remains separate. **Refresh status** remains available. Closing the GUI leaves the scheduled container running. Closing during a manual one-off requests cancellation and waits for bounded work to finish.
+
+The Docker-only Windows launcher detects the Windows timezone and converts it to
+an IANA name for the next-run display. **Use Windows zone for schedule** copies
+that zone into the schedule form for explicit saving. **Use Windows zone for
+source** is appropriate for a new setup only when SCADA records that PC's Windows
+local time. An assigned source needs a reviewed new generation before its source
+timezone changes. Uploaded original timestamps and separate milliseconds are
+preserved; a blank source zone stays unknown, regardless of Docker's clock.
+Existing uploads are not corrected by reopening the interface. See
+[timezone and daily reporting](../docs/collector-container-desktop.md#refresh-and-windows-timezone--7-november-2026).
 
 Opening settings clears credential entry fields. Editing connection/settings invalidates the preview connection check. External changes require reopening Docker settings before manual operations. Configuration and credentials pass through local Docker CLI stdin, with management-container logging disabled; no administration port or Collector listener is added. Stop the container before importing server setup.
 

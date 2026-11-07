@@ -1,6 +1,12 @@
 param([string]$Distribution = 'Ubuntu')
 $ErrorActionPreference = 'Stop'
 $context = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $PSScriptRoot 'windows-timezone.ps1')
+$collectorTimeZone = Get-CollectorWindowsTimezone
+$env:COLLECTOR_WINDOWS_TIMEZONE_ID = $collectorTimeZone.WindowsId
+$env:COLLECTOR_WINDOWS_TIMEZONE = $collectorTimeZone.IanaId
+$collectorWslVariables = @($env:WSLENV -split ':' | Where-Object { $_ -and $_ -notmatch '^COLLECTOR_WINDOWS_TIMEZONE(_ID)?(/.*)?$' })
+$env:WSLENV = (@($collectorWslVariables) + @('COLLECTOR_WINDOWS_TIMEZONE_ID', 'COLLECTOR_WINDOWS_TIMEZONE')) -join ':'
 # The host only starts Docker/WSLg; every Collector module runs in a container.
 function Test-CollectorEngine {
     # A stopped engine writes stderr on Windows PowerShell 5; it must remain a

@@ -12,6 +12,7 @@ DESKTOP_FILES = (
     'deploy/collector/control.py', 'deploy/collector/desktop.py',
     'deploy/collector/windows_runtime.py', 'deploy/collector/launch-container.sh',
     'deploy/collector/start-docker-desktop.ps1',
+    'deploy/collector/windows-timezone.ps1',
     'deploy/collector/collector.png',
 )
 

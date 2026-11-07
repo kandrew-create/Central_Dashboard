@@ -344,7 +344,8 @@ class CollectorWindow:
                   'upload_url':'Fixed HTTPS upload URL', 'upload_enabled':'Enable uploads', 'interval_seconds':'Interval (seconds)',
                   'schedule_mode':'Schedule', 'schedule_timezone':'Schedule timezone (IANA)', 'schedule_time':'Daily/weekly time (HH:MM)',
                   'upload_ca_file':'Trusted upload CA file (blank uses public CAs)',
-                  'schedule_weekday':'Weekly day (Monday=0, Sunday=6)'}
+                  'schedule_weekday':'Weekly day (Monday=0, Sunday=6)',
+                  'status_refresh_minutes':'Status refresh (minutes; 0 = manual, max 1440)'}
         for index, name in enumerate(name for name in EDITABLE_FIELDS[9:] if name != 'upload_url'):
             if name in self.identity_references:
                 row, column = (index//2)*2, index%2
@@ -368,9 +369,10 @@ class CollectorWindow:
 
     def _show_collection_status(self, result):
         next_run=result.get('next_run')
-        next_text=datetime.fromtimestamp(next_run).strftime('%Y-%m-%d %H:%M:%S') if next_run else 'Not scheduled'
+        from collector.time_display import next_run_text
+        next_text, display_zone = next_run_text(next_run, (self.saved or self.base).schedule_timezone)
         self.collection_status.set(f"Pending batches: {result.get('pending_batches',0)} | Queue: {result.get('pending_bytes',0)} bytes | "
-                                   f"Last upload: {result.get('last_successful_upload') or 'None'} | Next run on this PC: {next_text} | "
+                                   f"Last upload: {result.get('last_successful_upload') or 'None'} | Next run ({display_zone}): {next_text} | "
                                    f"Confirmed source time: {result.get('latest_confirmed_source_timestamp') or 'Unknown'} | Error: {result.get('latest_error') or 'None'}")
         self.status.set('Collection status updated.')
 

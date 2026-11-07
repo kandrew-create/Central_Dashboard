@@ -70,6 +70,10 @@ schedule_mode = "interval"
 schedule_timezone = "UTC"
 schedule_time = "02:00"
 schedule_weekday = 0
+
+[interface]
+# Status display only. Zero disables automatic refresh.
+status_refresh_minutes = 1
 '''
 
 
@@ -136,6 +140,7 @@ class CollectorConfig:
     schedule_timezone: str = "UTC"
     schedule_time: str = "02:00"
     schedule_weekday: int = 0
+    status_refresh_minutes: int = 1
 
     @property
     def state_path(self):
@@ -184,6 +189,7 @@ def parse_config(data, path):
                        "reconcile_ids", "queue_bytes", "min_free_bytes", "privacy"},
         "upload": {"upload_url", "upload_enabled", "upload_ca_file"},
         "schedule": {"interval_seconds", "schedule_mode", "schedule_timezone", "schedule_time", "schedule_weekday"},
+        "interface": {"status_refresh_minutes"},
     }
     if set(data) - {"version", *allowed} or type(data.get("version")) is not int or data["version"] != 1:
         raise CollectorError("Expected configuration version 1 with approved settings sections only.")
@@ -194,7 +200,7 @@ def parse_config(data, path):
     db, source, limits = (data.get(name, {}) for name in ("database", "source", "limits"))
     extra = {}
     defaults = {f.name: f.default for f in fields(CollectorConfig)}
-    for section in ("collection", "upload", "schedule"):
+    for section in ("collection", "upload", "schedule", "interface"):
         for name in allowed[section]:
             value = data.get(section, {}).get(name, defaults[name])
             if type(value) is not type(defaults[name]):
@@ -203,7 +209,7 @@ def parse_config(data, path):
     for name, low, high in (("page_rows", 1, 100), ("max_pages", 1, 100), ("overlap_seconds", 1, 86400),
                             ("reconcile_ids", 1, 10000000), ("queue_bytes", 1048576, 10737418240),
                             ("min_free_bytes", 0, 10737418240), ("interval_seconds", 10, 604800),
-                            ("schedule_weekday", 0, 6)):
+                            ("schedule_weekday", 0, 6), ("status_refresh_minutes", 0, 1440)):
         if not low <= extra[name] <= high:
             raise CollectorError(f"{name} must be from {low} to {high}.")
     for name in ("source_id", "generation_id"):
