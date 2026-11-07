@@ -54,7 +54,8 @@ allowlisted context; that Python environment is not used to run the installed ap
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy/collector/install-docker-desktop.ps1
 ```
 
-The installer builds a separate desktop image and creates **SCADA Collector -
+The installer builds the separate desktop and Collector runtime images on the
+host and creates **SCADA Collector -
 Docker** shortcuts in Start and on the desktop. Each installation uses a fresh
 directory under `%LOCALAPPDATA%\Linker\Collector\docker-desktop`. Earlier packages
 and all data/key volumes remain intact. Building requires access to Debian,
@@ -69,7 +70,10 @@ Open the shortcut. The launcher starts an already-installed Docker Desktop if
 necessary, starts WSLg, and opens only the `desktop` service in `linker-collector`.
 It never installs Windows features, changes source networking, creates keys,
 initializes data volumes or starts collection. Use **Start Collector** explicitly
-after commissioning. **Stop Collector** stops the scheduler normally; closing
+after commissioning. Start uses the installed runtime image with `--no-build
+--pull never`; it does not build images or contact a registry from the isolated
+interface. Reinstall the updated context to build new images before an upgrade.
+**Stop Collector** stops the scheduler normally; closing
 the interface leaves the scheduler's current state unchanged. Reopening starts
 only the interface and preserves an explicit scheduler stop.
 
@@ -144,6 +148,30 @@ PowerShell installer syntax validation passed. PostgreSQL integration, source
 connection, HTTPS credential validity, live delivery and reboot recovery were
 not tested as part of this desktop update. Private build logs and fingerprints
 remain under ignored `.tools/`.
+
+## Start failure correction — 6 November 2026
+
+Station2's first Start attempt exposed a missing acceptance check: the interface
+called Compose with `--build` even though its container has no network. Registry
+authentication failed before the scheduler could start. The earlier GUI tests
+mocked that operation and did not cover the actual nested image build.
+
+Container-interface Start now uses only the installed runtime image, with builds
+and pulls disabled. The Windows installation script builds both images before
+publishing the launcher. The interface retains its network isolation and no
+registry credentials are added to it. Legacy Windows-interface builds retain
+their existing host build behavior.
+
+The corrected image passed 58 focused Windows checks and 46 Linux desktop
+checks, without skips. A real Docker check inside the network-isolated desktop
+image started, inspected and stopped a separate disposable project using a local
+image and an intentionally unavailable Dockerfile. The check mounted no
+operational data/key volumes and removed its disposable container afterward.
+The user closed the old interface normally before its replacement opened;
+the running replacement loaded both the corrected Start implementation and the
+original setup. Data/key fingerprints matched before and after. The operational
+scheduler remains stopped; live source delivery and reboot recovery remain
+unverified. Private diagnostics and disposable check helpers remain in `.tools/`.
 
 ## Local removal — 6 November 2026
 

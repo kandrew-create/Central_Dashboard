@@ -173,7 +173,12 @@ class DockerControl:
                     return dict(running=False, engine_ready=False, action=action, message=message)
                 raise CollectorError(message)
             if action == 'start':
-                self._call('up', '-d', '--build', 'collector', timeout=300)
+                if self.containerized:
+                    # The local desktop has no network. Build images during
+                    # installation; starting must never contact a registry.
+                    self._call('up', '-d', '--no-build', '--pull', 'never', 'collector', timeout=150)
+                else:
+                    self._call('up', '-d', '--build', 'collector', timeout=300)
             elif action == 'stop':
                 self._call('stop', 'collector', timeout=150)
             try:

@@ -13,6 +13,25 @@ from deploy.collector.control import DockerControl
 
 
 class ContainerDesktopTests(unittest.TestCase):
+    def test_start_from_network_isolated_desktop_uses_installed_image_without_build_or_pull(self):
+        control = DockerControl()
+        control.containerized = True
+        with patch.object(control, '_engine', return_value=(True, None)), patch.object(
+                control, '_call', side_effect=['', '{"State":"running"}']) as call:
+            result = control.perform('start')
+        start = call.call_args_list[0]
+        self.assertEqual(start.args, ('up', '-d', '--no-build', '--pull', 'never', 'collector'))
+        self.assertTrue(result['running'])
+
+    def test_failed_prebuilt_start_does_not_fall_back_to_build_or_pull(self):
+        control = DockerControl()
+        control.containerized = True
+        with patch.object(control, '_engine', return_value=(True, None)), patch.object(
+                control, '_call', side_effect=CollectorError('Installed image is unavailable')) as call:
+            with self.assertRaisesRegex(CollectorError, 'Installed image'):
+                control.perform('start')
+        self.assertEqual(call.call_count, 1)
+
     def test_container_commands_remove_host_handoff_without_changing_project(self):
         control = DockerControl()
         control.containerized = True

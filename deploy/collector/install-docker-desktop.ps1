@@ -8,6 +8,10 @@ $installRoot = Join-Path $env:LOCALAPPDATA ('Linker\Collector\docker-desktop\' +
 if ($LASTEXITCODE -ne 0) { throw 'Cannot stage the Collector desktop.' }
 & docker --context desktop-linux build --file (Join-Path $installRoot 'deploy\collector\Dockerfile.desktop') --tag linker-scada-collector-desktop:local $installRoot
 if ($LASTEXITCODE -ne 0) { throw 'Cannot build the Collector desktop image. Earlier packages and all volumes are preserved.' }
+# The network-isolated desktop only starts prebuilt images; it cannot build or
+# authenticate to a registry. Build the scheduler/RPC image on the host here.
+& docker --context desktop-linux compose --project-name linker-collector -f (Join-Path $installRoot 'deploy\docker-compose.collector.yml') -f (Join-Path $installRoot 'deploy\docker-compose.collector.host.yml') build collector manager key-init
+if ($LASTEXITCODE -ne 0) { throw 'Cannot build the Collector runtime image. Earlier launchers and all volumes are preserved.' }
 $launcher = Join-Path $installRoot 'launch.vbs'
 $hostScript = Join-Path $installRoot 'deploy\collector\start-docker-desktop.ps1'
 $command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $hostScript + '" -Distribution "' + $Distribution + '"'
