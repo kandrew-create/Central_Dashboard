@@ -39,6 +39,32 @@ class ManagementIntegrationTests(PostgresCase):
     def register(self,**kwargs):
         return self.service.register('SCADA PC',customer_name='Customer',site_name='Site',project_name='Project',machine_tag='M-1',**kwargs)
 
+    def test_source_only_registration_export_and_rotation_preserve_empty_machine_scope(self):
+        with self.service.connection() as db:
+            before=db.execute('SELECT count(*) n FROM platform.machines').fetchone()['n']
+        source=self.service.register('Unassigned SCADA PC',customer_id=uid(1),site_id=uid(2),project_id=uid(3))
+        self.assertNotIn('machine_id',source)
+        self.assertNotIn('upload_token',source)
+        original=self.settings.data_dir/'unassigned.linker-collector'
+        self.service.export(source['source_id'],original,'fixture export password')
+        setup=decode_setup(original.read_bytes(),'fixture export password')
+        self.service.rotate(source['source_id'])
+        replacement=self.settings.data_dir/'replacement.linker-collector'
+        self.service.export(source['source_id'],replacement,'fixture export password')
+        updated=decode_setup(replacement.read_bytes(),'fixture export password')
+        self.assertEqual(updated['source_id'],setup['source_id'])
+        self.assertEqual(updated['generation_id'],setup['generation_id'])
+        self.assertNotEqual(updated['upload_token'],setup['upload_token'])
+        with self.service.connection() as db:
+            self.assertEqual(db.execute('SELECT count(*) n FROM platform.machines').fetchone()['n'],before)
+            self.assertEqual(db.execute('SELECT count(*) n FROM platform.credential_machines WHERE source_id=%s',
+                                       (source['source_id'],)).fetchone()['n'],0)
+            self.assertEqual(db.execute('SELECT count(*) n FROM platform.collector_credentials WHERE source_id=%s',
+                                       (source['source_id'],)).fetchone()['n'],2)
+            verifier=hashlib.sha256(updated['upload_token'].encode()).digest()
+            authenticated=db.execute('SELECT * FROM platform.authenticate_upload(%s)',(verifier,)).fetchone()
+            self.assertEqual(str(authenticated['source_id']),source['source_id'])
+
     def test_registration_accepts_pasted_project_and_preserves_existing_registry_on_invalid_names(self):
         result=self.service.register('SCADA PC',customer_name='Customer',site_name='Site',
                                      project_name='High Temperature\r\nProcessing Line\t',machine_tag='M-1')

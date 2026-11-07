@@ -8,6 +8,45 @@ The native **Central Server - WSL / Docker** management window uses Qt through W
 
 ## Open and use the GUI
 
+### Local Central-only installation — 6 November 2026
+
+At the user's request, the development PC now runs Central Server 0.6.2 in the
+existing `linker-scada-wsl` Docker Desktop project at
+`/home/station7/central-server`. Open **Central Server - WSL Docker** on the Windows
+desktop. The manager was launched through the existing windowless shortcut and
+its WSLg window was verified. Keep Docker Desktop running; closing the manager
+leaves the server running.
+
+The original Network listener and endpoint remain `187.17.53.84:8443`. API,
+PostgreSQL and worker readiness passed. Windows verified the existing HTTPS CA;
+unauthenticated upload/preflight requests returned 401 and the gateway root
+returned 404. A preflight using the existing protected credential returned 200.
+PostgreSQL, API and Ollama ports remain unpublished. This does not verify the
+actual remote Collector PC.
+
+Before replacement, a private AES-GCM-encrypted database dump was created and
+decrypted in memory for a successful `pg_restore --list` check. Matching recovery
+key, settings, vaults and old application files remain in the private Linux
+`secrets/before-local-central-install-*` directory. Keep this material outside Git
+and release packages; the list check is not a full restore rehearsal.
+
+The selected project was stopped before installing the verified allowlisted
+110-file payload and rebuilding its application images. Migrations advanced from
+`0010_alarm_warehouse` to `0012_shared_source_storage` in Central storage only.
+Database identity, the existing source, two batches, ten original saved record
+versions, credential/generation/scope fingerprints and legacy table OIDs were
+preserved. `.env`, CA, vault bytes and named volumes were unchanged. Saved AI
+settings/model volumes were retained without enabling AI from a display read.
+Unrelated Docker projects and the separate VMware/retained Windows installations
+were not replaced or migrated.
+
+The Windows Collector uninstaller completed with exit code 0 after the normal
+Windows administrator prompt. Collector Docker containers/dedicated images,
+installed desktop context and shortcuts were removed. Its two empty data/key
+volumes and private recovery files remain intact; see [Collector removal](collector-container-desktop.md#local-removal--6-november-2026).
+
+### Launch and use the manager
+
 On this PC, double-click **Central Server - WSL Docker** on the Windows desktop. This opens the Linux manager. Keep Docker Desktop running.
 
 From Ubuntu, the equivalent command is:
@@ -17,7 +56,7 @@ bash ~/central-server/deploy/wsl/launch-manager.sh
 ```
 
 1. **Overview:** refresh health and saved-record counts, start the Docker services, or stop this project. The overview also shows failed processing jobs. The upload URL is supplied through encrypted Collector setup and hidden from routine screens. Opening the updated GUI starts the configured project once; a ready project is reused. Closing leaves services running. It never creates demo sources.
-2. **Register source:** select the existing customer, site and project, choose an **existing machine**, then enter the SCADA PC/database source name. The current source removes **New machine tag** and machine creation from this form. A missing machine selection blocks registration before backend work; ask the Central Server administrator to register the machine and its hierarchy first if absent. Register each database source separately. Registration creates its IDs and an encrypted local credential without contacting a SCADA database. Its existing machine selection still controls credential scope and registered event identity. An unfinished registration is confirmed before closing the window.
+2. **Register source:** select or create the customer, site and project, then enter the SCADA PC/database source name. There is no machine selector or machine-tag entry. Register each database source separately. Registration creates its IDs and an encrypted local credential without contacting a SCADA database or assigning a machine. New sources can upload original records with unknown mappings quarantined; unassigned events remain uncertain without AI. Existing source assignments are preserved. Later machine authorization and approved mapping are separate administrative work; an empty machine scope never grants all-machine access. See [registration behavior](source-registration.md). An unfinished registration is confirmed before closing the window.
 3. **Sources & setup:** select the registered source and export a new `.linker-collector` file with a password of at least 12 characters. The default export folder is `/home/station7/central-server/exports`, accessible in Windows Explorer as `\\wsl.localhost\Ubuntu\home\station7\central-server\exports`. Transfer the file and password separately, then import it into a separately configured Windows Collector. Credential replacement preserves earlier credentials; confirmed deletion revokes credentials while retaining received data and audit history. A refresh preserves the selected identity when it still exists and clears selection when it has been removed.
 4. **Deployment:** edit Local/Network mode, Central PC hostname/IPv4, listener, HTTPS port and local HTTP redirect port. **Validate settings** checks the Windows host address and ports without saving. **Save settings** requires this server to be stopped. **Apply and restart** confirms an interruption and stops only this project before saving/restarting. Unrelated settings, credentials and volumes are preserved. A private backup and recovery journal protect interrupted saves. Export fresh Collector setups after endpoint changes. PostgreSQL binaries/storage stay Docker-managed; moving the workspace/project requires a separate migration.
 5. **Identification:** reads up to 200 saved equipment results with original-message evidence. Select an installed local Ollama model and use **Enable local AI** or **Disable**. Enabling checks the model first. Reading or selecting this page never enables AI or calls a model, and refresh preserves unsaved model entries. The current model runs in a private Docker Ollama service at ollama:11434; older deployments can retain the Windows-host provider. See [Docker model transfer](ollama-docker.md). Saved AI settings persist in a separate ai-settings volume and can be read while the database is stopped. Preserve that volume alongside other server volumes. Event identification uses the registered machine tag.

@@ -247,20 +247,25 @@ class ManagerService:
                     project=dict(project_id=uuid4(),**parent,name=text(project_name,'project name'))
                     db.execute('INSERT INTO platform.projects VALUES (%(project_id)s,%(customer_id)s,%(site_id)s,%(name)s)',project)
                 scope=dict(**parent,project_id=project['project_id'])
+                machine=None
                 if machine_id:
                     machine=self._existing(db,'machines','machine_id',machine_id,scope)
-                else:
+                elif machine_tag:
                     tag=text(machine_tag,'machine tag')
                     machine=dict(machine_id=uuid4(),**scope,machine_tag=tag,name=tag)
                     db.execute('INSERT INTO platform.machines VALUES (%(machine_id)s,%(customer_id)s,%(site_id)s,%(project_id)s,%(machine_tag)s,%(name)s)',machine)
-                ids=dict(**scope,machine_id=machine['machine_id'],source_id=uuid4(),collector_id=uuid4(),generation_id=uuid4(),credential_id=uuid4(),mapping_version_id=uuid4())
+                # Source-only registration grants no machine scope. Keep explicit
+                # administrative provisioning compatible without inventing a tag.
+                ids=dict(**scope,source_id=uuid4(),collector_id=uuid4(),generation_id=uuid4(),credential_id=uuid4(),mapping_version_id=uuid4())
+                if machine is not None:ids['machine_id']=machine['machine_id']
                 token=secrets.token_urlsafe(32)
                 values=dict(ids,name=source_name,verifier=hashlib.sha256(token.encode()).digest())
                 db.execute('INSERT INTO platform.collectors(collector_id,customer_id,site_id,name) VALUES (%(collector_id)s,%(customer_id)s,%(site_id)s,%(name)s)',values)
                 db.execute("INSERT INTO platform.sources VALUES (%(source_id)s,%(customer_id)s,%(site_id)s,%(project_id)s,%(collector_id)s,%(name)s,'ecostruxure_machine_scada_expert_v1',NULL)",values)
                 db.execute("INSERT INTO platform.source_generations VALUES (%(generation_id)s,%(customer_id)s,%(source_id)s,1,'locally commissioned source',current_user,'Central Server manager registration',now(),NULL)",values)
                 db.execute('INSERT INTO platform.collector_credentials(credential_id,customer_id,site_id,project_id,source_id,verifier) VALUES (%(credential_id)s,%(customer_id)s,%(site_id)s,%(project_id)s,%(source_id)s,%(verifier)s)',values)
-                db.execute('INSERT INTO platform.credential_machines VALUES (%(customer_id)s,%(site_id)s,%(project_id)s,%(source_id)s,%(credential_id)s,%(machine_id)s)',values)
+                if machine is not None:
+                    db.execute('INSERT INTO platform.credential_machines VALUES (%(customer_id)s,%(site_id)s,%(project_id)s,%(source_id)s,%(credential_id)s,%(machine_id)s)',values)
                 db.execute('INSERT INTO platform.mapping_versions(mapping_version_id,customer_id,site_id,project_id,source_id,version) VALUES (%(mapping_version_id)s,%(customer_id)s,%(site_id)s,%(project_id)s,%(source_id)s,1)',values)
                 db.execute("INSERT INTO platform.audit_log(customer_id,actor,action,entity_type,entity_id) VALUES (%(customer_id)s,current_user,'source_registered','source',%(source_id)s)",values)
                 setup={k:str(v) for k,v in ids.items()}
@@ -340,9 +345,8 @@ class ManagerService:
             credential=uuid4()
             db.execute('INSERT INTO platform.collector_credentials(credential_id,customer_id,site_id,project_id,source_id,verifier) VALUES (%s,%s,%s,%s,%s,%s)',
                        (credential,source['customer_id'],source['site_id'],source['project_id'],source['source_id'],hashlib.sha256(token.encode()).digest()))
-            copied=db.execute('''INSERT INTO platform.credential_machines SELECT DISTINCT customer_id,site_id,project_id,source_id,%s,machine_id
-                FROM platform.credential_machines WHERE source_id=%s RETURNING machine_id''',(credential,source['source_id'])).fetchall()
-            if not copied:raise CollectorError('Assign an approved machine before creating a collector credential.')
+            db.execute('''INSERT INTO platform.credential_machines SELECT DISTINCT customer_id,site_id,project_id,source_id,%s,machine_id
+                FROM platform.credential_machines WHERE source_id=%s''',(credential,source['source_id']))
             setup={k:str(source[k]) for k in ('customer_id','site_id','project_id','source_id')}
             setup.update(credential_id=str(credential),generation_id=str(generation['generation_id']),source_name=source['name'],upload_token=token)
             self._store(setup)

@@ -381,31 +381,30 @@ class DockerManagerWindow(QMainWindow):
         grid.setColumnStretch(1, 1)
         self.choices = {}
         self.names = {}
-        for index, name in enumerate(('customer', 'site', 'project', 'machine')):
+        for index, name in enumerate(('customer', 'site', 'project')):
             row = index * 3
-            title = 'Existing machine' if name == 'machine' else name.title()
+            title = name.title()
             grid.addWidget(label(title, 'fieldLabel'), row, 0)
             combo = QComboBox()
-            combo.addItem('Select existing machine' if name == 'machine' else 'Create new ' + name, None)
-            grid.addWidget(combo, row + 1, 0, 1, 2 if name == 'machine' else 1)
-            if name != 'machine':
-                grid.addWidget(label('New ' + title.lower(), 'fieldLabel'), row, 1)
-                entry = QLineEdit()
-                entry.setPlaceholderText('Enter ' + title.lower())
-                grid.addWidget(entry, row + 1, 1)
-                self.names[name] = entry
-                self.controls.append(entry)
-                entry.textChanged.connect(self._form_edited)
+            combo.addItem('Create new ' + name, None)
+            grid.addWidget(combo, row + 1, 0)
+            grid.addWidget(label('New ' + title.lower(), 'fieldLabel'), row, 1)
+            entry = QLineEdit()
+            entry.setPlaceholderText('Enter ' + title.lower())
+            grid.addWidget(entry, row + 1, 1)
+            self.names[name] = entry
+            self.controls.append(entry)
+            entry.textChanged.connect(self._form_edited)
             grid.setRowMinimumHeight(row + 2, 10)
             self.choices[name] = combo
             self.controls.append(combo)
             combo.currentIndexChanged.connect(lambda index, field=name: self._choice_changed(field))
-        grid.addWidget(label('SCADA PC / database source name', 'fieldLabel'), 12, 0, 1, 2)
+        grid.addWidget(label('SCADA PC / database source name', 'fieldLabel'), 9, 0, 1, 2)
         self.names['source'] = QLineEdit()
         self.names['source'].setPlaceholderText('A clear name for this SCADA database source')
         self.names['source'].textChanged.connect(self._form_edited)
         self.controls.append(self.names['source'])
-        grid.addWidget(self.names['source'], 13, 0, 1, 2)
+        grid.addWidget(self.names['source'], 10, 0, 1, 2)
         box.addLayout(grid)
         actions = QHBoxLayout()
         self.register_button = self.button('Register source & generate IDs', self.register_source, 'primary', 'register')
@@ -413,7 +412,7 @@ class DockerManagerWindow(QMainWindow):
         actions.addStretch()
         box.addLayout(actions)
         box.addWidget(label('Database credentials, collection history and schedules stay on the Collector PC.', 'help', True))
-        box.addWidget(label('Select a previously registered machine under its customer, site and project.', 'help', True))
+        box.addWidget(label('Equipment assignments remain unassigned until approved separately.', 'help', True))
         layout.addWidget(frame)
         layout.addStretch()
         return page
@@ -567,7 +566,7 @@ class DockerManagerWindow(QMainWindow):
         row.addStretch()
         row.addWidget(self.button('Refresh results', self.refresh_identification, 'quiet', 'refresh'))
         box.addLayout(row)
-        box.addWidget(label('Events use the registered machine tag. Enable optional local AI below for alarm equipment suggestions.', 'muted', True))
+        box.addWidget(label('Events use an existing authorized machine assignment; unassigned events remain uncertain. Enable optional local AI below for alarm equipment suggestions.', 'muted', True))
         ai_controls = QHBoxLayout()
         self.ai_model = QLineEdit('qwen3:4b')
         self.ai_model.setPlaceholderText('Installed local Ollama model')
@@ -822,8 +821,8 @@ class DockerManagerWindow(QMainWindow):
         self._cascade(field)
 
     def _cascade(self, changed=None):
-        order = ('customer', 'site', 'project', 'machine')
-        tables = dict(customer='customers', site='sites', project='projects', machine='machines')
+        order = ('customer', 'site', 'project')
+        tables = dict(customer='customers', site='sites', project='projects')
         start = order.index(changed) + 1 if changed else 0
         for name in order[start:]:
             box = self.choices[name]
@@ -834,9 +833,9 @@ class DockerManagerWindow(QMainWindow):
                 records = [row for row in records if parent and str(row[ancestor + '_id']) == str(parent[ancestor + '_id'])]
             box.blockSignals(True)
             box.clear()
-            box.addItem('Select existing machine' if name == 'machine' else 'Create new ' + name, None)
+            box.addItem('Create new ' + name, None)
             for record in records:
-                box.addItem(record.get('machine_tag', record['name']), record)
+                box.addItem(record['name'], record)
                 if previous and str(previous[name + '_id']) == str(record[name + '_id']):
                     box.setCurrentIndex(box.count() - 1)
             box.blockSignals(False)
@@ -1059,10 +1058,6 @@ class DockerManagerWindow(QMainWindow):
                 existing = self.choices[name].currentData()
                 values[name + '_id'] = existing[name + '_id'] if existing else None
                 values[parameter] = '' if existing else text(self.names[name].text(), title)
-            machine = self.choices['machine'].currentData()
-            if machine is None:
-                raise CollectorError('Select an existing machine under the selected customer, site and project.')
-            values['machine_id'] = machine['machine_id']
             values['source_name'] = text(self.names['source'].text(), 'SCADA PC/database source name')
         except CollectorError as error:
             self.footer.setText(str(error))

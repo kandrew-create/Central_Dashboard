@@ -12,7 +12,6 @@ from server.management.service import ManagerService,text
 from server.management.settings import ServerSettings,load_settings,save_settings
 
 NEW='<Create new>'
-EXISTING_MACHINE='<Select existing machine>'
 MODES={'Local testing (one PC)':'local','Network server (multiple collector PCs)':'network'}
 
 
@@ -52,7 +51,7 @@ class ManagerWindow:
         self.connection_summary=tk.StringVar(root)
         self.url_preview=tk.StringVar(root)
         self.names={name:tk.StringVar(root) for name in ('customer','site','project','source')}
-        self.choices={name:tk.StringVar(root,EXISTING_MACHINE if name=='machine' else NEW) for name in ('customer','site','project','machine')}
+        self.choices={name:tk.StringVar(root,NEW) for name in ('customer','site','project')}
         root.title(self.window_title)
         root.geometry('1220x830');root.minsize(1080,750)
         root.protocol('WM_DELETE_WINDOW',self.close)
@@ -127,7 +126,7 @@ class ManagerWindow:
         card=ttk.Frame(parent,style='Card.TFrame',padding=20);card.pack(fill='both',expand=True)
         ttk.Label(card,text='Equipment Identification',style='Title.TLabel').pack(anchor='w')
         ttk.Label(card,text='Uses an AI model installed locally on this Central Server PC to suggest equipment names from alarm messages/tags. '
-                  'Events use the machine tag entered at source registration, without AI. '
+                  'Events use an existing authorized machine assignment, without AI; unassigned events remain uncertain. '
                   'Original logs stay unchanged. Equipment names are suggestions; unknown or ambiguous '
                   'machine assignments remain pending approval.',style='Card.TLabel',wraplength=1000).pack(anchor='w',pady=8)
         ttk.Label(card,text='Shows up to 200 identification results from registered SCADA sources uploading to this server, including other collector PCs. '
@@ -266,25 +265,23 @@ class ManagerWindow:
         ttk.Label(card,text='Register a SCADA database source',style='Title.TLabel').grid(row=0,column=0,columnspan=2,sticky='w',pady=(0,12))
         card.columnconfigure(0,weight=1);card.columnconfigure(1,weight=1)
         self.boxes={}
-        for index,name in enumerate(('customer','site','project','machine')):
+        for index,name in enumerate(('customer','site','project')):
             row=index*3+1
             ttk.Label(card,text='Existing '+name,style='Card.TLabel').grid(row=row,column=0,sticky='w')
-            placeholder=EXISTING_MACHINE if name=='machine' else NEW
-            box=ttk.Combobox(card,textvariable=self.choices[name],values=(placeholder,),state='readonly',width=42)
-            box.grid(row=row+1,column=0,columnspan=2 if name=='machine' else 1,sticky='ew',padx=(0,0 if name=='machine' else 16),pady=(4,12))
+            box=ttk.Combobox(card,textvariable=self.choices[name],values=(NEW,),state='readonly',width=42)
+            box.grid(row=row+1,column=0,sticky='ew',padx=(0,16),pady=(4,12))
             box.bind('<<ComboboxSelected>>',lambda _,key=name:self._cascade(key))
             self.boxes[name]=box;self.controls.append((box,'readonly'))
-            if name!='machine':
-                ttk.Label(card,text='New '+name+' name',style='Card.TLabel').grid(row=row,column=1,sticky='w')
-                entry=ttk.Entry(card,textvariable=self.names[name]);entry.grid(row=row+1,column=1,sticky='ew',pady=(4,12))
-                self.controls.append((entry,'normal'))
-        ttk.Label(card,text='SCADA PC / database source name',style='Card.TLabel').grid(row=13,column=0,columnspan=2,sticky='w')
-        entry=ttk.Entry(card,textvariable=self.names['source']);entry.grid(row=14,column=0,columnspan=2,sticky='ew',pady=(4,10))
+            ttk.Label(card,text='New '+name+' name',style='Card.TLabel').grid(row=row,column=1,sticky='w')
+            entry=ttk.Entry(card,textvariable=self.names[name]);entry.grid(row=row+1,column=1,sticky='ew',pady=(4,12))
+            self.controls.append((entry,'normal'))
+        ttk.Label(card,text='SCADA PC / database source name',style='Card.TLabel').grid(row=10,column=0,columnspan=2,sticky='w')
+        entry=ttk.Entry(card,textvariable=self.names['source']);entry.grid(row=11,column=0,columnspan=2,sticky='ew',pady=(4,10))
         self.controls.append((entry,'normal'))
         self.register_button=self.button(card,'Register source and generate IDs',self.register_source)
-        self.register_button.grid(row=15,column=0,columnspan=2,sticky='w',pady=8)
-        ttk.Label(card,text='Select a previously registered machine under its customer, site and project. Registration creates the Source ID, Generation ID and protected upload credential. Database connection settings and collection schedules stay on the SCADA PC.',
-                  style='Card.TLabel',wraplength=1000).grid(row=16,column=0,columnspan=2,sticky='w',pady=8)
+        self.register_button.grid(row=12,column=0,columnspan=2,sticky='w',pady=8)
+        ttk.Label(card,text='Registration creates the Source ID, Generation ID and protected upload credential. Equipment assignments remain unassigned until approved separately. Database connection settings and collection schedules stay on the SCADA PC.',
+                  style='Card.TLabel',wraplength=1000).grid(row=13,column=0,columnspan=2,sticky='w',pady=8)
 
     def _sources_tab(self,parent):
         card=ttk.Frame(parent,style='Card.TFrame',padding=20);card.pack(fill='both',expand=True)
@@ -327,9 +324,9 @@ class ManagerWindow:
         return self.choice_maps.get(name,{}).get(self.choices[name].get())
 
     def _cascade(self,changed=None):
-        order=('customer','site','project','machine')
+        order=('customer','site','project')
         start=order.index(changed)+1 if changed else 0
-        tables=dict(customer='customers',site='sites',project='projects',machine='machines')
+        tables=dict(customer='customers',site='sites',project='projects')
         for name in order[start:]:
             records=self.registry[tables[name]]
             for ancestor in order[:order.index(name)]:
@@ -337,11 +334,10 @@ class ManagerWindow:
                 if parent is None:
                     records=[];break
                 records=[row for row in records if row.get(ancestor+'_id')==parent[ancestor+'_id']]
-            mapping={f"{row.get('machine_tag',row['name'])} [{row[name+'_id']}]":row for row in records}
+            mapping={f"{row['name']} [{row[name+'_id']}]":row for row in records}
             self.choice_maps[name]=mapping
-            placeholder=EXISTING_MACHINE if name=='machine' else NEW
-            self.boxes[name].configure(values=(placeholder,*mapping))
-            self.choices[name].set(placeholder)
+            self.boxes[name].configure(values=(NEW,*mapping))
+            self.choices[name].set(NEW)
 
     def _start(self,label,work,done):
         if self.busy:return False
@@ -450,10 +446,6 @@ class ManagerWindow:
                 if row is None:
                     values[key]=text(values[key],label)
                     self.names[name].set(values[key])
-            machine=self._chosen('machine')
-            if machine is None:
-                raise CollectorError('Select an existing machine under the selected customer, site and project.')
-            values['machine_id']=machine['machine_id']
         except CollectorError as error:
             self.status_text.set(str(error))
             messagebox.showerror('Registration settings',str(error),parent=self.root)

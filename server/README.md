@@ -16,6 +16,8 @@ The Central Server receives authenticated HTTPS uploads from SCADA Collectors an
 
 The separate [SCADA Collector](../collector/README.md) runs on the SCADA PC. It uses source database credentials and an outbound upload connection. The two applications share protocol definitions in `shared/`.
 
+Current source-registration forms ask for customer, site, project and SCADA source name only. They create no machine assignment; raw uploads remain scoped to the source, unknown mappings stay quarantined, and unassigned events remain uncertain. Existing assignments are retained. See [source registration](../docs/source-registration.md).
+
 Network mode accepts multiple collector PCs at one Central Server HTTPS endpoint. Register each SCADA database source separately and give each collector its own encrypted setup file and upload credential. Allow all intended collector PCs through the server firewall. The current manager labels this **Network server (multiple collector PCs)**; the older **two PCs** label did not enforce a two-PC limit.
 
 ## Windows package

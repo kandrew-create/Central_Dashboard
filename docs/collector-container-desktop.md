@@ -102,8 +102,35 @@ Start/Stop, normal close, configuration privacy and missing-state behavior. No
 SCADA database was accessed and no PostgreSQL integration was required for this
 desktop-only change. Detailed final test counts are recorded in `AGENTS.md`.
 
-The replacement Start/desktop shortcuts and `Launch Collector.cmd` launch only
-the Docker interface. Removal of the old native Windows package was requested
-through its standard uninstaller; its Windows administrator/UAC approval remains
-pending. That package is not running or used by the new launchers. Cold Docker
-startup and reboot recovery were not tested by interrupting other local projects.
+The replacement Start/desktop shortcuts and `Launch Collector.cmd` launched only
+the Docker interface. At that time, removal of the old native Windows package was
+awaiting Windows administrator/UAC approval; it completed on 6 November as noted
+below. Cold Docker startup and reboot recovery were not tested by interrupting
+other local projects.
+
+## Local removal — 6 November 2026
+
+The user selected this development PC for Docker Central Server and a separate
+PC for the Collector. The standard Windows Collector uninstaller completed with
+exit code 0. Its installed Program Files directory and installed-app registration
+are gone. The stopped `linker-collector-desktop` container and all four dedicated
+Collector runtime/desktop/test image tags were removed, as were the active Start
+and desktop shortcuts. The installed Docker desktop context was moved into a
+private recovery directory outside Git, so `current-launch.vbs` is no longer
+installed. No Collector containers or dedicated image tags remain in Docker
+Desktop. No Collector service, scheduled collection or Linux desktop entry was
+found running.
+
+Both `linker-collector_collector-data` and `linker-collector_collector-key` remain
+preserved. They contain no files; read-only before/after fingerprints matched.
+No source setup, key or replacement queue was initialized. Protected local
+recovery material is retained under ignored `secrets/local-collector-removal-*`.
+Source checkout files and earlier installers remain available for development and
+the other PC; they are not installed/running Collector applications.
+
+The retained `dist/installer/collector/0.4.1-b2f43dd017` installer and companion
+Docker context ZIP were checked against their SHA-256 sidecars. They retain the
+earlier native Windows interface; use this guide for a container-only interface.
+Installation and source/HTTPS commissioning on the other PC remain separate
+work. Existing SCADA software, drivers, source databases and unrelated Docker
+projects were not removed. See [the running local Central Server](wsl-deployment.md#local-central-only-installation--6-november-2026).

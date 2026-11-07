@@ -332,6 +332,27 @@ class DeliveryIntegrationTests(PostgresCase):
         self.assertEqual(self.scalar("SELECT status FROM platform.machine_interpretations WHERE source_table='alarmhistory'"),'pending')
         self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'2')
 
+    def test_unassigned_source_accepts_raw_records_without_granting_machine_scope(self):
+        from unittest.mock import Mock
+        from server.worker.machine_ai import interpret_once
+        self._run(f"DELETE FROM platform.credential_machines WHERE credential_id='{uid(50)}'")
+        headers={'Authorization':'Bearer '+self.token}
+        self.assertEqual(self.api.post('/v1/collector-check',json=dict(source_id=uid(6),generation_id=uid(7)),
+                                       headers=headers).status_code,200)
+        # An empty scope is never a wildcard for an already approved machine.
+        self.assertEqual(self.post(self.batch(wire(al_tag='TAG'))).status_code,403)
+        self.assertEqual(self.post(self.batch(wire(al_tag='UNKNOWN'))).status_code,200)
+        self.assertEqual(self.post(self.batch(wire(table='eventhistory',ev_message='Oven 99',ev_source='LINE-01'))).status_code,200)
+        self.assertTrue(work_once(self.worker));self.assertTrue(work_once(self.worker))
+        self.assertEqual(self.scalar("SELECT count(*) FROM platform.alarm_event_revisions WHERE mapping_status='quarantined' AND machine_id IS NULL"),'2')
+        client=Mock()
+        self.assertTrue(interpret_once(self.worker,None,client,allow_alarms=False))
+        client.stream.assert_not_called()
+        self.assertEqual(self.scalar("SELECT status FROM platform.machine_interpretations WHERE source_table='eventhistory'"),'uncertain')
+        self.assertEqual(self.scalar("SELECT jsonb_array_length(candidates) FROM platform.machine_interpretations WHERE source_table='eventhistory'"),'0')
+        other=make_batch(uid(106),uid(107),str(uuid4()),[wire()])
+        self.assertEqual(self.post(other).status_code,403)
+
     def test_events_with_multiple_authorized_machines_remain_uncertain_without_ai(self):
         from unittest.mock import Mock
         from server.worker.machine_ai import interpret_once

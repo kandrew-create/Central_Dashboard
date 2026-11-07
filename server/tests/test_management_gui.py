@@ -246,13 +246,11 @@ class ManagerWindowTests(unittest.TestCase):
         self.assertTrue(self.app.tree.exists(str(row['source_id'])))
         self.assertEqual(self.app.status_text.get(),'Cannot delete this source.')
 
-    def select_registered_machine(self):
-        customer_id=uuid4();site_id=uuid4();project_id=uuid4();machine_id=uuid4()
+    def select_registered_hierarchy(self):
+        customer_id=uuid4();site_id=uuid4();project_id=uuid4()
         self.app.registry['customers']=[dict(customer_id=customer_id,name='Existing customer')]
         self.app.registry['sites']=[dict(customer_id=customer_id,site_id=site_id,name='Existing site')]
         self.app.registry['projects']=[dict(customer_id=customer_id,site_id=site_id,project_id=project_id,name='Existing project')]
-        self.app.registry['machines']=[dict(customer_id=customer_id,site_id=site_id,project_id=project_id,
-                                            machine_id=machine_id,name='Machine',machine_tag='M-1')]
         self.app._cascade()
         self.app.choices['customer'].set(next(iter(self.app.choice_maps['customer'])))
         self.app._cascade('customer')
@@ -261,23 +259,24 @@ class ManagerWindowTests(unittest.TestCase):
         self.app._cascade('site')
         self.app.choices['project'].set(next(iter(self.app.choice_maps['project'])))
         self.app._cascade('project')
-        self.app.choices['machine'].set(next(iter(self.app.choice_maps['machine'])))
-        return customer_id,site_id,project_id,machine_id
+        return customer_id,site_id,project_id
 
     def test_registration_hierarchy_and_generated_identity_display(self):
-        customer_id,site_id,project_id,machine_id=self.select_registered_machine()
+        customer_id,site_id,project_id=self.select_registered_hierarchy()
+        self.assertEqual(set(self.app.choices),{'customer','site','project'})
+        self.assertEqual(set(self.app.names),{'customer','site','project','source'})
         self.app.names['source'].set('SCADA PC')
         self.app.register_source();self.wait_idle()
         params=self.service.register.call_args.kwargs
         self.assertEqual(params['customer_id'],customer_id)
         self.assertEqual(params['site_id'],site_id)
         self.assertEqual(params['project_id'],project_id)
-        self.assertEqual(params['machine_id'],machine_id)
+        self.assertNotIn('machine_id',params)
         self.assertNotIn('machine_tag',params)
         self.assertEqual(params['source_name'],'SCADA PC')
 
     def test_registration_normalizes_pasted_names_before_sending_them(self):
-        self.select_registered_machine()
+        self.select_registered_hierarchy()
         self.app.names['source'].set(' SCADA\r\n PC\t')
         with patch('server.management.gui.messagebox.showerror') as error:
             self.app.register_source();self.wait_idle()

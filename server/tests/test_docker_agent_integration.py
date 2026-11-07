@@ -53,6 +53,25 @@ class DockerAgentIntegrationTests(PostgresCase):
         values.update(arguments)
         return self.agent.register(**values)
 
+    def test_registration_without_machine_preserves_source_scope_on_rotation_and_export(self):
+        with self.agent.connection() as db:
+            before=db.execute('SELECT count(*) n FROM platform.machines').fetchone()['n']
+        source=self.agent.register('Unassigned source',customer_name='Customer',site_name='Site',project_name='Project')
+        self.assertNotIn('machine_id',source)
+        self.agent.rotate(source['source_id'])
+        exported=Path(self.directory.name)/'unassigned.linker-collector'
+        self.agent.export(source['source_id'],exported,'fixture export password')
+        setup=decode_setup(exported.read_bytes(),'fixture export password')
+        self.assertEqual(setup['source_id'],source['source_id'])
+        self.assertEqual(setup['generation_id'],source['generation_id'])
+        with self.agent.connection() as db:
+            self.assertEqual(db.execute('SELECT count(*) n FROM platform.machines').fetchone()['n'],before)
+            self.assertEqual(db.execute('SELECT count(*) n FROM platform.credential_machines WHERE source_id=%s',
+                                       (source['source_id'],)).fetchone()['n'],0)
+            verifier=hashlib.sha256(setup['upload_token'].encode()).digest()
+            authenticated=db.execute('SELECT * FROM platform.authenticate_upload(%s)',(verifier,)).fetchone()
+            self.assertEqual(str(authenticated['source_id']),source['source_id'])
+
     def test_registration_reuse_encrypted_export_rotation_and_soft_deletion(self):
         first = self.register()
         sibling = self.register(customer_id=first['customer_id'], site_id=first['site_id'],

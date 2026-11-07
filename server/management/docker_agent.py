@@ -96,10 +96,11 @@ class DockerAgent(ManagerService):
                       customer_id=customer_id, site_id=site_id, project_id=project_id, machine_id=machine_id)
         for identifier, name, label in (('customer_id', 'customer_name', 'customer name'),
                                         ('site_id', 'site_name', 'site name'),
-                                        ('project_id', 'project_name', 'project name'),
-                                        ('machine_id', 'machine_tag', 'machine tag')):
+                                        ('project_id', 'project_name', 'project name')):
             if not values[identifier]:
                 values[name] = text(values[name], label)
+        if not machine_id and machine_tag:
+            values['machine_tag'] = text(machine_tag, 'machine tag')
         return super().register(**values)
 
     def counts(self):
