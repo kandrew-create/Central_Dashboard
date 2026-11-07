@@ -1,4 +1,5 @@
 import os
+import csv
 from pathlib import Path
 import tempfile
 import threading
@@ -10,6 +11,7 @@ from collector.errors import CollectorError
 from server.management.docker import DockerManagerService, DockerSettings
 
 try:
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication, QDialog, QLabel
     from server.management.qt_docker_gui import DockerManagerWindow, ExportPasswordDialog
 except ImportError:
@@ -217,6 +219,212 @@ class ModernDockerWindowTests(unittest.TestCase):
         from PySide6.QtWidgets import QPushButton
         self.assertFalse(any('/v1/uploads' in item.text() for item in self.app.findChildren(QLabel)))
         self.assertFalse(any('Copy URL' == item.text() for item in self.app.findChildren(QPushButton)))
+
+    def table_filter_result(self):
+        result=self.equipment_result()
+        result['issues'][0]['message']='Conveyor VFD <Connect Error>'
+        result['issues'].append(dict(result['issues'][0],source_id='00000000-0000-0000-0000-000000000106',
+            source_name='Other source',condition_key='b'*64,tag='PUMP',message='Pump temperature high',
+            equipment_name='Cooling Pump',equipment_override='Cooling Pump',equipment_origin='manual',
+            override_version=1,ai_suggestions='Pump'))
+        result['daily']=[dict(day='2026-10-20',record_type='Alarm',source_name='Fixture source',
+            description='Conveyor VFD <Connect Error>',equipment_name='Conveyor VFD',equipment_origin='ai',occurrences=1),
+            dict(day=None,record_type='Event',source_name='Other source',description='Operator start',
+                 equipment_name=None,equipment_origin='unavailable',occurrences=2)]
+        return result
+
+    def test_analysis_searches_are_independent_literal_case_insensitive_and_clearable_without_io(self):
+        self.app._show_analysis(self.table_filter_result())
+        self.service.reset_mock()
+        for query in ('fixture source','VFD','<connect error>','conveyor vfd'):
+            self.app.analysis_issues_search.setText(query)
+            self.assertFalse(self.app.analysis_issues.isRowHidden(0))
+            self.assertTrue(self.app.analysis_issues.isRowHidden(1))
+            self.assertEqual(self.app.analysis_issues_count.text(),'1 of 2 loaded groups')
+        self.assertFalse(self.app.analysis_daily.isRowHidden(1))
+        for query in ('event','operator start','uncertain date','unavailable','OTHER SOURCE'):
+            self.app.analysis_daily_search.setText(query)
+            self.assertTrue(self.app.analysis_daily.isRowHidden(0))
+            self.assertFalse(self.app.analysis_daily.isRowHidden(1))
+            self.assertEqual(self.app.analysis_daily_count.text(),'1 of 2 loaded groups')
+        self.app.analysis_issues_search.setText('.*')
+        self.assertEqual(self.app.analysis_issues_count.text(),'0 of 2 loaded groups')
+        for name in ('analysis_issues','analysis_daily'):
+            search=getattr(self.app,name+'_search')
+            self.assertTrue(search.isClearButtonEnabled())
+            search.clear()
+            table=getattr(self.app,name)
+            self.assertTrue(all(not table.isRowHidden(index) for index in range(table.rowCount())))
+            self.assertEqual(getattr(self.app,name+'_count').text(),'2 of 2 loaded groups')
+        self.assertEqual(self.service.mock_calls,[])
+
+    def test_analysis_filter_clears_hidden_equipment_selection_and_keeps_visible_row_identity(self):
+        result=self.table_filter_result()
+        self.app._show_analysis(result)
+        self.app.analysis_issues.selectRow(0)
+        self.assertTrue(self.app.edit_equipment_button.isEnabled())
+        self.app.analysis_issues_search.setText('cooling pump')
+        self.assertIsNone(self.app.selected_alarm_group())
+        self.assertFalse(self.app.edit_equipment_button.isEnabled())
+        self.app.edit_equipment()
+        self.assertIsNone(self.app._equipment_dialog)
+        self.app.analysis_issues.selectRow(1)
+        self.assertEqual(self.app.selected_alarm_group()['source_id'],result['issues'][1]['source_id'])
+        self.app.edit_equipment_button.click()
+        self.application.processEvents()
+        self.assertEqual(self.app._equipment_dialog.entry.text(),'Cooling Pump')
+        self.app._equipment_dialog.reject()
+        self.service.save_equipment_override.assert_not_called()
+
+    def test_analysis_search_persists_through_refresh_scope_changes_and_empty_error_results(self):
+        result=self.table_filter_result()
+        self.app._show_analysis(result)
+        self.app.analysis_issues_search.setText('cooling pump')
+        self.app.analysis_daily_search.setText('event')
+        self.app._show_analysis(result)
+        self.assertTrue(self.app.analysis_issues.isRowHidden(0))
+        self.assertTrue(self.app.analysis_daily.isRowHidden(0))
+        self.app._analysis_filter_changed()
+        self.assertEqual(self.app.analysis_issues_count.text(),'0 of 0 loaded groups')
+        self.assertEqual(self.app.analysis_daily_count.text(),'0 of 0 loaded groups')
+        self.app._show_analysis(result)
+        self.assertEqual(self.app.analysis_issues_search.text(),'cooling pump')
+        self.assertEqual(self.app.analysis_daily_search.text(),'event')
+        self.assertEqual(self.app.analysis_issues_count.text(),'1 of 2 loaded groups')
+        self.assertEqual(self.app.analysis_daily_count.text(),'1 of 2 loaded groups')
+        self.app._show_analysis(dict(error='Report unavailable'))
+        self.assertEqual(self.app.analysis_issues_count.text(),'0 of 0 loaded groups')
+        self.assertEqual(self.app.analysis_daily_count.text(),'0 of 0 loaded groups')
+        self.assertEqual(self.app.analysis_issues_search.text(),'cooling pump')
+        self.service.enable_machine_ai.assert_not_called()
+
+    def test_excel_column_menu_search_apply_cancel_and_combined_filters_keep_row_identity(self):
+        self.app._show_analysis(self.table_filter_result())
+        self.app.analysis_issues.selectRow(0)
+        self.app.analysis_issues.horizontalHeader().sectionClicked.emit(4)
+        dialog=self.app._column_filter_dialog
+        self.assertIsNotNone(dialog)
+        dialog.search.setText('cooling')
+        dialog.reject()
+        self.assertEqual(self.app._analysis_column_filters['analysis_issues'],{})
+        self.app._open_analysis_column_filter('analysis_issues',4)
+        dialog=self.app._column_filter_dialog
+        dialog.search.setText('COOLING')
+        dialog.accept()
+        self.assertEqual(self.app._analysis_column_filters['analysis_issues'][4],{'Cooling Pump'})
+        self.assertTrue(self.app.analysis_issues.isRowHidden(0))
+        self.assertFalse(self.app.analysis_issues.isRowHidden(1))
+        self.assertIsNone(self.app.selected_alarm_group())
+        self.assertFalse(self.app.edit_equipment_button.isEnabled())
+        self.assertIn('•',self.app.analysis_issues.horizontalHeaderItem(4).text())
+        self.app._set_analysis_column_filter('analysis_issues',0,{'Fixture source'})
+        self.assertEqual(self.app.analysis_issues_count.text(),'0 of 2 loaded groups')
+        self.assertFalse(self.app.analysis_issues_export.isEnabled())
+        self.app._open_analysis_column_filter('analysis_issues',0)
+        self.app._column_filter_dialog.clear_button.click()
+        self.assertEqual(self.app.analysis_issues_count.text(),'1 of 2 loaded groups')
+        self.app.analysis_issues.selectRow(1)
+        self.assertEqual(self.app.selected_alarm_group()['condition_key'],'b'*64)
+        self.app.analysis_issues_clear_columns.click()
+        self.assertEqual(self.app.analysis_issues_count.text(),'2 of 2 loaded groups')
+
+    def test_column_checkboxes_select_none_all_and_filters_persist_after_refresh(self):
+        result=self.table_filter_result()
+        self.app._show_analysis(result)
+        self.app._open_analysis_column_filter('analysis_daily',1)
+        dialog=self.app._column_filter_dialog
+        dialog.select_all.click()
+        self.assertTrue(all(dialog.values.item(i).checkState()==Qt.CheckState.Unchecked for i in range(dialog.values.count())))
+        for i in range(dialog.values.count()):
+            item=dialog.values.item(i)
+            if item.text()=='Event':item.setCheckState(Qt.CheckState.Checked)
+        dialog.accept()
+        self.app._show_analysis(result)
+        self.assertEqual(self.app._analysis_column_filters['analysis_daily'][1],{'Event'})
+        self.assertTrue(self.app.analysis_daily.isRowHidden(0))
+        self.app._open_analysis_column_filter('analysis_daily',1)
+        dialog=self.app._column_filter_dialog
+        dialog._select_shown(True)
+        dialog.accept()
+        self.assertEqual(self.app._analysis_column_filters['analysis_daily'],{})
+        self.app._set_analysis_column_filter('analysis_daily',1,set())
+        self.assertEqual(self.app.analysis_daily_count.text(),'0 of 2 loaded groups')
+        self.app._open_analysis_column_filter('analysis_daily',6)
+        self.assertIsNone(self.app._column_filter_dialog)
+        self.app._clear_analysis_columns('analysis_daily')
+
+    def test_column_filter_pauses_refresh_and_parent_close_until_finished(self):
+        self.app._show_analysis(self.table_filter_result())
+        self.app._set_refresh_preference(dict(interval_seconds=60))
+        self.app._open_analysis_column_filter('analysis_daily',1)
+        self.assertFalse(self.app.refresh_timer.isActive())
+        self.service.status.reset_mock()
+        self.app._automatic_refresh()
+        self.service.status.assert_not_called()
+        self.app.close()
+        self.assertTrue(self.app.isVisible())
+        self.app._column_filter_dialog.reject()
+        self.assertIsNone(self.app._column_filter_dialog)
+        self.assertTrue(self.app.refresh_timer.isActive())
+
+    def test_csv_exports_visible_rows_with_unicode_quotes_origin_and_off_thread_write(self):
+        from server.management.qt_docker_gui import write_analysis_csv
+        result=self.table_filter_result()
+        result['daily'][1]['description']='Opérateur, "start"\nsecond line'
+        self.app._show_analysis(result)
+        self.app._set_analysis_column_filter('analysis_daily',1,{'Event'})
+        path=Path(self.directory.name)/'visible-analysis'
+        threads=[]
+        def write(*args):
+            threads.append(threading.get_ident())
+            return write_analysis_csv(*args)
+        with patch('server.management.qt_docker_gui.QFileDialog.getSaveFileName',return_value=(str(path),'')),patch(
+                'server.management.qt_docker_gui.write_analysis_csv',side_effect=write):
+            self.app.analysis_daily_export.click()
+            self.wait_idle()
+        exported=path.with_suffix('.csv')
+        self.assertTrue(exported.read_bytes().startswith(b'\xef\xbb\xbf'))
+        with exported.open(encoding='utf-8-sig',newline='') as source:rows=list(csv.reader(source))
+        self.assertEqual(len(rows),2)
+        self.assertEqual(rows[0],['UTC DAY','TYPE','SOURCE','ALARM / EVENT DESCRIPTION','EQUIPMENT NAME','OCCURRENCES','EQUIPMENT ORIGIN'])
+        self.assertEqual(rows[1],['Uncertain date','Event','Other source','Opérateur, "start"\nsecond line',
+                                  'Uncertain / unavailable','2','Uncertain / unavailable'])
+        self.assertNotEqual(threads[0],threading.get_ident())
+        self.assertIn('Exported 1 rows',self.app.footer.text())
+        self.service.enable_machine_ai.assert_not_called()
+
+    def test_csv_cancel_and_write_failure_preserve_table_filters_and_existing_file(self):
+        self.app._show_analysis(self.table_filter_result())
+        self.app._set_analysis_column_filter('analysis_issues',4,{'Cooling Pump'})
+        with patch('server.management.qt_docker_gui.QFileDialog.getSaveFileName',return_value=('','')):
+            self.app.analysis_issues_export.click()
+        path=Path(self.directory.name)/'existing.csv'
+        path.write_text('keep existing',encoding='utf-8')
+        with patch('server.management.qt_docker_gui.QFileDialog.getSaveFileName',return_value=(str(path),'')),patch(
+                'server.management.qt_docker_gui.os.replace',side_effect=OSError('private error')),patch(
+                'server.management.qt_docker_gui.QMessageBox.critical') as popup:
+            self.app.analysis_issues_export.click();self.wait_idle()
+        popup.assert_called_once()
+        self.assertEqual(path.read_text(encoding='utf-8'),'keep existing')
+        self.assertNotIn('private error',self.app.footer.text())
+        self.assertEqual(list(path.parent.glob('.linker-csv-*')),[])
+        self.assertEqual(self.app._analysis_column_filters['analysis_issues'][4],{'Cooling Pump'})
+        self.assertEqual(self.app.analysis_issues_count.text(),'1 of 2 loaded groups')
+
+    def test_csv_neutralizes_spreadsheet_formulas_without_changing_table_data(self):
+        from server.management.qt_docker_gui import write_analysis_csv
+        path=Path(self.directory.name)/'formula.csv'
+        values=['=1+1','+SUM(A1)','-1+2','@SUM(A1)',' \t=1','\ttext','ordinary','1']
+        write_analysis_csv(path,['DESCRIPTION'],[[value] for value in values])
+        with path.open(encoding='utf-8-sig',newline='') as source:rows=list(csv.reader(source))[1:]
+        self.assertEqual([row[0] for row in rows],["'"+value for value in values[:6]]+values[6:])
+
+    def test_settings_and_configuration_navigation_name_and_caption_fit(self):
+        self.app.navigate(3)
+        self.assertEqual(self.app.page_title.text(),'Settings & Configuration')
+        self.assertEqual(self.app.nav_buttons[3].text().replace('&&','&'),'Settings & Configuration')
+        self.application.processEvents()
+        self.assertGreaterEqual(self.app.nav_buttons[3].width(),self.app.nav_buttons[3].sizeHint().width())
 
     def test_background_analysis_failure_preserves_save_feedback_and_server_status(self):
         self.app.navigate(4)
@@ -549,7 +757,7 @@ class ModernDockerWindowTests(unittest.TestCase):
     def test_identification_page_removed_and_ai_controls_live_in_analysis(self):
         from server.management.qt_docker_gui import PAGES
         self.assertEqual(self.app.pages.count(),5)
-        self.assertEqual([page[0] for page in PAGES],['Overview','Register source','Sources & setup','Deployment','Analysis'])
+        self.assertEqual([page[0] for page in PAGES],['Overview','Register source','Sources & setup','Settings & Configuration','Analysis'])
         self.assertEqual(self.app.nav_buttons[4].text(),'Analysis')
         self.assertFalse(hasattr(self.app,'ai_table'))
         self.app.navigate(4);self.wait_idle()

@@ -1,15 +1,18 @@
 """Modern local desktop for the WSL/Docker server; backend operations remain in docker.py."""
 import argparse
+import csv
+import os
+import tempfile
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QSize, QThreadPool, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QPoint, QRunnable, QSize, QThreadPool, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
-    QApplication, QAbstractItemView, QButtonGroup, QComboBox, QDialog, QDialogButtonBox,
+    QApplication, QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
+    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
     QDoubleSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -25,7 +28,7 @@ PAGES = (
     ('Overview', 'Server health, activity and quick actions.', 'overview'),
     ('Register source', 'Connect a SCADA database source to this server.', 'register'),
     ('Sources & setup', 'Manage registrations and export collector setup files.', 'sources'),
-    ('Deployment', 'Your Linux workspace and Docker server connection.', 'deployment'),
+    ('Settings & Configuration', 'Your Linux workspace and Docker server connection.', 'deployment'),
     ('Analysis', 'Recurring alarms, daily alarm/event activity and equipment evidence.', 'overview'),
 )
 
@@ -177,6 +180,96 @@ class EquipmentOverrideDialog(QDialog):
         if not self.saving:super().reject()
 
 
+def write_analysis_csv(path,headers,rows):
+    """Write a spreadsheet-safe snapshot without exposing a partial export."""
+    temporary=None
+    def cell(value):
+        return "'"+value if value.lstrip().startswith(('=','+','-','@')) or value.startswith(('\t','\r','\n')) else value
+    try:
+        with tempfile.NamedTemporaryFile(mode='w',encoding='utf-8-sig',newline='',
+                dir=path.parent,prefix='.linker-csv-',delete=False) as output:
+            temporary=Path(output.name)
+            writer=csv.writer(output)
+            writer.writerow(headers)
+            writer.writerows([[cell(value) for value in row] for row in rows])
+        os.replace(temporary,path)
+    except (OSError,UnicodeError):
+        raise CollectorError('Could not export CSV. Check the folder permissions and close the file if it is open.') from None
+    finally:
+        if temporary is not None:temporary.unlink(missing_ok=True)
+    return dict(rows=len(rows),path=str(path))
+
+
+class ColumnFilterDialog(QDialog):
+    filter_applied=Signal(object)
+
+    def __init__(self,parent,title,values,selected):
+        super().__init__(parent,Qt.WindowType.Popup)
+        self.setWindowTitle('Filter '+title)
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.resize(360,420)
+        box=QVBoxLayout(self)
+        box.addWidget(label('Filter '+title,'sectionTitle',True))
+        self.search=QLineEdit()
+        self.search.setPlaceholderText('Search column values')
+        self.search.setClearButtonEnabled(True)
+        self.search.setAccessibleName('Search column values')
+        box.addWidget(self.search)
+        self.select_all=QCheckBox('Select all shown')
+        self.select_all.setTristate(True)
+        box.addWidget(self.select_all)
+        self.values=QListWidget()
+        for value in sorted(values,key=lambda value:(value.casefold(),value)):
+            item=QListWidgetItem(value or '(Blank)')
+            item.setData(Qt.ItemDataRole.UserRole,value)
+            item.setToolTip(value)
+            item.setFlags(item.flags()|Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if selected is None or value in selected else Qt.CheckState.Unchecked)
+            self.values.addItem(item)
+        box.addWidget(self.values,1)
+        self.buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Apply|QDialogButtonBox.StandardButton.Cancel)
+        self.clear_button=self.buttons.addButton('Clear filter',QDialogButtonBox.ButtonRole.ResetRole)
+        self.buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        self.clear_button.clicked.connect(self.clear_filter)
+        box.addWidget(self.buttons)
+        self.search.textChanged.connect(self._search_changed)
+        self.select_all.clicked.connect(self._select_shown)
+        self.values.itemChanged.connect(self._sync_select_all)
+        self._sync_select_all()
+
+    def _shown(self):
+        return [self.values.item(index) for index in range(self.values.count()) if not self.values.item(index).isHidden()]
+
+    def _search_changed(self,value):
+        query=value.strip().casefold()
+        for index in range(self.values.count()):
+            item=self.values.item(index)
+            item.setHidden(query not in item.text().casefold())
+        self._sync_select_all()
+
+    def _select_shown(self,checked):
+        self.values.blockSignals(True)
+        for item in self._shown():item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+        self.values.blockSignals(False)
+        self._sync_select_all()
+
+    def _sync_select_all(self,*args):
+        shown=self._shown()
+        checked=sum(item.checkState()==Qt.CheckState.Checked for item in shown)
+        self.select_all.setCheckState(Qt.CheckState.Checked if shown and checked==len(shown)
+            else Qt.CheckState.PartiallyChecked if checked else Qt.CheckState.Unchecked)
+
+    def accept(self):
+        selected={item.data(Qt.ItemDataRole.UserRole) for item in self._shown() if item.checkState()==Qt.CheckState.Checked}
+        self.filter_applied.emit(None if len(selected)==self.values.count() else selected)
+        super().accept()
+
+    def clear_filter(self):
+        self.filter_applied.emit(None)
+        super().accept()
+
+
 class DockerManagerWindow(QMainWindow):
     def __init__(self, service, auto_refresh=True, auto_start=False):
         super().__init__()
@@ -189,6 +282,9 @@ class DockerManagerWindow(QMainWindow):
         self._ai_pending = False
         self._analysis_pending = False
         self.analysis_rows=[]
+        self._analysis_column_filters={'analysis_issues':{},'analysis_daily':{}}
+        self._analysis_headers={}
+        self._column_filter_dialog=None
         self._equipment_dialog=None
         self._equipment_editing_available=False
         self._work = None
@@ -283,6 +379,8 @@ class DockerManagerWindow(QMainWindow):
         side.addSpacing(15)
         side.addWidget(label('Linker  ·  v' + __version__, 'sidebarNote'))
         root.addWidget(sidebar)
+        for button in self.nav_buttons:button.ensurePolished()
+        sidebar.setFixedWidth(max(224,max(button.sizeHint().width() for button in self.nav_buttons)+36))
         workspace = QWidget()
         workspace.setObjectName('workspace')
         content = QVBoxLayout(workspace)
@@ -666,17 +764,21 @@ class DockerManagerWindow(QMainWindow):
         box.addWidget(self.analysis_note)
         self._analysis_ai_controls(box)
         box.addWidget(label('RECURRING ALARMS · TOP 50 EXACT MESSAGE / TAG GROUPS', 'eyebrow'))
+        self._analysis_search(box,'analysis_issues','Search loaded alarms: source, tag, description or equipment')
         self.analysis_issues = self._table(('SOURCE', 'TAG', 'ORIGINAL MESSAGE', 'OCCURRENCES',
                                           'EQUIPMENT', 'AI SUGGESTIONS · UNVERIFIED'))
         self.analysis_issues.itemSelectionChanged.connect(self._sync_controls)
         self.analysis_issues.setMinimumHeight(190)
+        self._analysis_header_filters('analysis_issues')
         box.addWidget(self.analysis_issues, 2)
         self.edit_equipment_button=self.button('Edit / override equipment',self.edit_equipment,'primary')
         box.addWidget(self.edit_equipment_button)
         box.addWidget(label('DAILY ALARM / EVENT OCCURRENCES', 'eyebrow'))
+        self._analysis_search(box,'analysis_daily','Search loaded daily rows: date, type, source, description or equipment')
         self.analysis_daily = self._table(('UTC DAY', 'TYPE', 'SOURCE', 'ALARM / EVENT DESCRIPTION',
                                            'EQUIPMENT NAME', 'OCCURRENCES', 'RELATIVE ACTIVITY'))
         self.analysis_daily.setMinimumHeight(125)
+        self._analysis_header_filters('analysis_daily')
         box.addWidget(self.analysis_daily, 1)
         box.addWidget(label('The time filter uses when an occurrence was first saved by Central Server. '
                             'Daily rows use verified source dates; unknown or conflicting times appear as Uncertain date. '
@@ -686,10 +788,119 @@ class DockerManagerWindow(QMainWindow):
         layout.addWidget(frame)
         return page
 
+    def _analysis_search(self,box,name,placeholder):
+        row=QHBoxLayout()
+        search=QLineEdit()
+        search.setPlaceholderText(placeholder)
+        search.setAccessibleName('Filter recurring alarm table' if name=='analysis_issues' else 'Filter daily occurrence table')
+        search.setToolTip('Search the loaded rows only. Customer, source and time filters set the report scope. '
+                          'Clear the search to show all loaded groups.')
+        search.setClearButtonEnabled(True)
+        count=label('0 of 0 loaded groups','help')
+        setattr(self,name+'_search',search)
+        setattr(self,name+'_count',count)
+        row.addWidget(search,1)
+        row.addWidget(count)
+        clear=self.button('Clear column filters',lambda:self._clear_analysis_columns(name))
+        export=self.button('Export .csv',lambda:self.export_analysis_csv(name))
+        setattr(self,name+'_clear_columns',clear)
+        setattr(self,name+'_export',export)
+        row.addWidget(clear)
+        row.addWidget(export)
+        box.addLayout(row)
+        search.textChanged.connect(self._filter_analysis_tables)
+
+    def _analysis_header_filters(self,name):
+        table=getattr(self,name)
+        count=table.columnCount()-(1 if name=='analysis_daily' else 0)
+        self._analysis_headers[name]=[table.horizontalHeaderItem(column).text() for column in range(count)]
+        for column,title in enumerate(self._analysis_headers[name]):
+            table.horizontalHeaderItem(column).setText(title+' ▾')
+            table.horizontalHeaderItem(column).setToolTip('Click to filter this column')
+        table.horizontalHeader().setSectionsClickable(True)
+        table.horizontalHeader().sectionClicked.connect(lambda column:self._open_analysis_column_filter(name,column))
+
+    def _analysis_row_matches(self,name,index,skip_column=None):
+        table=getattr(self,name)
+        query=getattr(self,name+'_search').text().strip().casefold()
+        values={column:item.text() for column in range(table.columnCount())
+                if (item:=table.item(index,column)) is not None}
+        return (not query or query in ' '.join(values.values()).casefold()) and all(
+            column==skip_column or values.get(column,'') in selected
+            for column,selected in self._analysis_column_filters[name].items())
+
+    def _open_analysis_column_filter(self,name,column):
+        if self.busy or self._column_filter_dialog is not None or column>=len(self._analysis_headers[name]):return
+        table=getattr(self,name)
+        selected=self._analysis_column_filters[name].get(column)
+        values={table.item(index,column).text() for index in range(table.rowCount())
+                if self._analysis_row_matches(name,index,skip_column=column)}
+        if selected is not None:values.update(selected)
+        dialog=ColumnFilterDialog(self,self._analysis_headers[name][column],values,selected)
+        self._column_filter_dialog=dialog
+        self.refresh_timer.stop()
+        dialog.filter_applied.connect(lambda selected:self._set_analysis_column_filter(name,column,selected))
+        dialog.finished.connect(self._column_filter_closed)
+        dialog.finished.connect(dialog.deleteLater)
+        header=table.horizontalHeader()
+        dialog.move(header.mapToGlobal(QPoint(header.sectionViewportPosition(column),header.height())))
+        dialog.open()
+
+    def _column_filter_closed(self,*args):
+        self._column_filter_dialog=None
+        self._arm_refresh_timer()
+
+    def _set_analysis_column_filter(self,name,column,selected):
+        if selected is None:self._analysis_column_filters[name].pop(column,None)
+        else:self._analysis_column_filters[name][column]=set(selected)
+        self._filter_analysis_tables()
+
+    def _clear_analysis_columns(self,name):
+        self._analysis_column_filters[name].clear()
+        self._filter_analysis_tables()
+
+    def _filter_analysis_tables(self,*args):
+        for name in ('analysis_issues','analysis_daily'):
+            table=getattr(self,name)
+            visible=0
+            for index in range(table.rowCount()):
+                hidden=not self._analysis_row_matches(name,index)
+                table.setRowHidden(index,hidden)
+                visible+=not hidden
+            if table.currentRow()>=0 and table.isRowHidden(table.currentRow()):
+                table.clearSelection()
+            getattr(self,name+'_count').setText(f'{visible:,} of {table.rowCount():,} loaded groups')
+            for column,title in enumerate(self._analysis_headers[name]):
+                active=column in self._analysis_column_filters[name]
+                table.horizontalHeaderItem(column).setText(title+(' • ▾' if active else ' ▾'))
+                table.horizontalHeaderItem(column).setToolTip('Click to filter this column'+(' (filter active)' if active else ''))
+        self._sync_controls()
+
+    def export_analysis_csv(self,name):
+        if self.busy:return
+        table=getattr(self,name)
+        headers=list(self._analysis_headers[name])+['EQUIPMENT ORIGIN']
+        equipment_column=4
+        rows=[[table.item(index,column).text() for column in range(len(headers)-1)]+
+              [table.item(index,equipment_column).toolTip()]
+              for index in range(table.rowCount()) if not table.isRowHidden(index)]
+        if not rows:return
+        self.refresh_timer.stop()
+        try:
+            path,_=QFileDialog.getSaveFileName(self,'Export visible analysis rows',
+                str(self.service.export_directory/(name+'-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'.csv')),
+                'CSV files (*.csv)',options=QFileDialog.Option.DontUseNativeDialog)
+        finally:self._arm_refresh_timer()
+        if not path:return
+        if not path.lower().endswith('.csv'):path+='.csv'
+        self._start('Exporting visible rows to CSV…',lambda:write_analysis_csv(Path(path),headers,rows),
+            lambda result:self.footer.setText(f"Exported {result['rows']:,} rows to {result['path']}"))
+
     def _analysis_filter_changed(self, *args):
         self.analysis_freshness.clear()
         self.analysis_issues.setRowCount(0)
         self.analysis_daily.setRowCount(0)
+        self._filter_analysis_tables()
         self.analysis_summary.setText('Scope changed. Analyze saved alarms to update the results.')
 
     def _analysis_filters(self):
@@ -713,6 +924,7 @@ class DockerManagerWindow(QMainWindow):
             self.analysis_summary.setText('Start the server to analyze its saved alarms.')
             self.analysis_issues.setRowCount(0)
             self.analysis_daily.setRowCount(0)
+            self._filter_analysis_tables()
             return
         days, source, customer = (self.analysis_days.currentData(), self.analysis_source.currentData(),
                                   self.analysis_customer.currentData())
@@ -735,6 +947,7 @@ class DockerManagerWindow(QMainWindow):
         self.analysis_rows=[]
         self._equipment_editing_available=result.get('equipment_editing_available',False)
         if 'error' in result:
+            self._filter_analysis_tables()
             self.analysis_freshness.clear()
             self.analysis_summary.setText(result['error'])
             self.footer.setText('Alarm analysis could not be loaded. Saved records are retained.')
@@ -761,7 +974,8 @@ class DockerManagerWindow(QMainWindow):
             for column, value in enumerate((row['source_name'], row['tag'], row['message'], row['occurrences'],
                                             row.get('equipment_name') or row['ai_suggestions'],row['ai_suggestions'])):
                 self.analysis_issues.setItem(index, column, QTableWidgetItem(str(value) if value is not None else 'Uncertain / unavailable'))
-            self.analysis_issues.item(index,4).setToolTip('Edited by user' if row.get('equipment_origin')=='manual' else 'Unverified saved AI suggestion')
+            self.analysis_issues.item(index,4).setToolTip('Edited by user' if row.get('equipment_origin')=='manual'
+                else 'Unverified saved AI suggestion' if row.get('equipment_name') or row.get('ai_suggestions') else 'Uncertain / unavailable')
             if selected and row.get('condition_key')==selected.get('condition_key') and row.get('source_id')==selected.get('source_id'):
                 self.analysis_issues.selectRow(index)
         self._sync_controls()
@@ -782,12 +996,14 @@ class DockerManagerWindow(QMainWindow):
             bar.setValue(round(row['occurrences'] * 1000 / largest))
             bar.setTextVisible(False)
             self.analysis_daily.setCellWidget(index, 6, bar)
+        self._filter_analysis_tables()
         self.footer.setText('Alarm analysis updated from saved records. AI settings are unchanged.')
 
     def selected_alarm_group(self):
         if not hasattr(self,'analysis_issues'):return None
         index=self.analysis_issues.currentRow()
-        return self.analysis_rows[index] if 0<=index<len(self.analysis_rows) and self.analysis_issues.selectedItems() else None
+        return self.analysis_rows[index] if (0<=index<len(self.analysis_rows)
+            and not self.analysis_issues.isRowHidden(index) and self.analysis_issues.selectedItems()) else None
 
     def edit_equipment(self):
         row=self.selected_alarm_group()
@@ -947,6 +1163,11 @@ class DockerManagerWindow(QMainWindow):
     def _sync_controls(self):
         for control in self.controls:
             control.setEnabled(not self.busy)
+        for name in ('analysis_issues','analysis_daily'):
+            table=getattr(self,name)
+            getattr(self,name+'_export').setEnabled(not self.busy and any(
+                not table.isRowHidden(index) for index in range(table.rowCount())))
+            getattr(self,name+'_clear_columns').setEnabled(not self.busy and bool(self._analysis_column_filters[name]))
         self.enable_ai_button.setEnabled(not self.busy and self._ai_enabled is False)
         self.disable_ai_button.setEnabled(not self.busy and self._ai_enabled is True)
         self.enable_ai_button.setToolTip('AI is already enabled. Disable it first to change the active model.'
@@ -1062,7 +1283,7 @@ class DockerManagerWindow(QMainWindow):
 
     def _automatic_refresh(self):
         self.refresh_timer.stop()
-        if (not self._saved_refresh_interval or self.busy or self.closing or self._equipment_dialog is not None or not self.isVisible() or self.form_dirty or self._deployment_dirty()
+        if (not self._saved_refresh_interval or self.busy or self.closing or self._equipment_dialog is not None or self._column_filter_dialog is not None or not self.isVisible() or self.form_dirty or self._deployment_dirty()
                 or self._refresh_seconds() != self._saved_refresh_interval
                 or (self._ai_saved_model is not None and self.ai_model.text() != self._ai_saved_model)):
             self._arm_refresh_timer()
@@ -1281,6 +1502,11 @@ class DockerManagerWindow(QMainWindow):
         self._start('Disabling local AI…', self.service.disable_machine_ai, disabled)
 
     def closeEvent(self, event):
+        if self._column_filter_dialog is not None:
+            self._column_filter_dialog.raise_()
+            self.footer.setText('Finish or cancel the column filter before closing.')
+            event.ignore()
+            return
         if self._equipment_dialog is not None and self._equipment_dialog.isVisible():
             self._equipment_dialog.raise_()
             self.footer.setText('Finish or cancel the equipment editor before closing.')
