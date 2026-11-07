@@ -18,6 +18,7 @@ alarm_table = "alarmhistory"
 event_table = "eventhistory"
 # Empty means unknown. Supply the actual source IANA timezone during setup.
 timezone = ""
+use_pc_timezone = false
 
 [limits]
 preview_rows = 20

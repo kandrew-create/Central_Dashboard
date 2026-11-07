@@ -8,6 +8,18 @@ from collector.errors import CollectorError
 
 
 class ConfigTests(unittest.TestCase):
+    def test_pc_timezone_setting_requires_a_valid_captured_zone_and_roundtrips(self):
+        from collector.desktop import serialize_config
+        original = self.load(EXAMPLE)
+        self.assertFalse(original.use_pc_timezone)
+        configured = self.load(EXAMPLE.replace('use_pc_timezone = false', 'use_pc_timezone = true')
+                               .replace('timezone = ""', 'timezone = "America/New_York"'))
+        self.assertTrue(self.load(serialize_config(configured)).use_pc_timezone)
+        for text in (EXAMPLE.replace('use_pc_timezone = false', 'use_pc_timezone = true'),
+                     EXAMPLE.replace('use_pc_timezone = false', 'use_pc_timezone = "yes"')):
+            with self.assertRaises(CollectorError):
+                self.load(text)
+
     def test_refresh_preference_defaults_for_old_config_and_does_not_change_collection_binding(self):
         from dataclasses import replace
         from collector.collection import binding

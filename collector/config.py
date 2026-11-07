@@ -36,6 +36,7 @@ event_table = "eventhistory"
 # Set the actual source IANA timezone, for example America/Toronto.
 # Empty preserves local timestamps without guessing UTC.
 timezone = ""
+use_pc_timezone = false
 
 [limits]
 preview_rows = 20
@@ -141,6 +142,7 @@ class CollectorConfig:
     schedule_time: str = "02:00"
     schedule_weekday: int = 0
     status_refresh_minutes: int = 1
+    use_pc_timezone: bool = False
 
     @property
     def state_path(self):
@@ -182,7 +184,7 @@ def parse_config(data, path):
     allowed = {
         "database": {"host", "port", "name", "user", "sslmode", "connect_timeout_seconds",
                      "statement_timeout_ms", "lock_timeout_ms"},
-        "source": {"profile", "schema", "alarm_table", "event_table", "timezone"},
+        "source": {"profile", "schema", "alarm_table", "event_table", "timezone", "use_pc_timezone"},
         "limits": {"preview_rows", "max_field_bytes", "max_output_bytes"},
         "collection": {"source_id", "generation_id", "collection_enabled", "marker_verified", "scan_mode",
                        "history_start", "history_end", "all_history", "page_rows", "max_pages", "overlap_seconds",
@@ -264,6 +266,11 @@ def parse_config(data, path):
     if source.get("profile", PROFILE) != PROFILE:
         raise CollectorError("Unsupported source profile.")
     timezone = source.get("timezone", "")
+    use_pc_timezone = source.get('use_pc_timezone', False)
+    if type(use_pc_timezone) is not bool:
+        raise CollectorError('use_pc_timezone must be True or False.')
+    if use_pc_timezone and not timezone:
+        raise CollectorError('Detect and save this PC\'s IANA timezone before using PC local time.')
     if not isinstance(timezone, str) or len(timezone) > 128:
         raise CollectorError("timezone must be an IANA timezone name or empty.")
     if timezone:
@@ -282,7 +289,7 @@ def parse_config(data, path):
         connect_timeout_seconds=_integer(db, "connect_timeout_seconds", 5, 1, 60),
         statement_timeout_ms=_integer(db, "statement_timeout_ms", 5000, 100, 60000),
         lock_timeout_ms=_integer(db, "lock_timeout_ms", 1000, 100, 5000),
-        schema=schema, alarm_table=alarm, event_table=event, timezone=timezone,
+        schema=schema, alarm_table=alarm, event_table=event, timezone=timezone, use_pc_timezone=use_pc_timezone,
         preview_rows=_integer(limits, "preview_rows", 20, 1, 100),
         max_field_bytes=_integer(limits, "max_field_bytes", 4096, 128, 16384),
         max_output_bytes=_integer(limits, "max_output_bytes", 262144, 1024, 1048576),

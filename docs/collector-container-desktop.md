@@ -193,13 +193,24 @@ Windows with daylight-saving adjustment disabled is left undetected rather than
 assuming ordinary IANA rules. No source or schedule setting is changed on launch.
 The mapping uses [ICU's Windows timezone conversion](https://unicode-org.github.io/icu-docs/apidoc/dev/icu4c/ucal_8h.html).
 
-**Use Windows zone for schedule** explicitly fills the schedule form. **Use
-Windows zone for source** fills a new source's form only when the operator has
-verified that SCADA writes Windows local timestamps. An assigned source with a
-different/blank source zone shows a review message without changing it. The source
-timezone is part of the existing generation's binding; switching it requires a
-reviewed new generation. Neither Docker's timezone nor a display preference is
-used to guess source timestamps or rewrite existing uploads.
+**Use Windows zone for schedule** explicitly fills the schedule form. The saved
+**Use this SCADA PC's local timezone** checkbox is on **Connection & setup**:
+checked captures the Windows/IANA zone and disables manual source-zone entry;
+unchecked enables manual entry. The **Use Windows zone for source** shortcut
+selects the same checkbox. Confirm that SCADA records Windows local timestamps
+before using it. Save the choice as `[source].use_pc_timezone` and the resolved
+snapshot as `[source].timezone`. Missing detection does not enable PC-local mode,
+and enabling that mode requires a valid captured timezone. Opening a saved setup
+does not recapture or alter its effective zone if Windows settings have changed.
+The summary distinguishes the selected form value from the saved source zone.
+
+Before writing settings, a read-only SQLite binding check rejects a changed
+effective timezone in an already-collected generation. It retains the original
+configuration, queue, IDs and checkpoints and reports the need for a provisioned
+new generation. Newly configured/uncollected setups may save the choice; changing
+PC/manual mode while retaining the same effective timezone does not reinterpret
+records. Neither Docker's timezone nor a display preference guesses timestamps
+or rewrites existing uploads.
 
 Station2's Windows timezone is **Eastern Standard Time → America/New_York**.
 The operator confirmed SCADA uses that PC's Windows local time, but its assigned
@@ -223,6 +234,16 @@ and its saved schedule resumed. Data/key fingerprints matched while stopped.
 The reopened interface reported the Windows zone, 1-minute refresh and unchanged
 blank source/UTC schedule settings. No source database or Central schema was
 changed; no PostgreSQL integration or historical repair was performed.
+
+The subsequent PC-local/manual checkbox update passed **117 Windows checks**
+without skips and **82 Linux image checks**, with five Windows-only credential/
+desktop checks skipped there. New checks cover persistent mode selection,
+manual-entry state, unavailable detection, later Windows zone changes and a
+rejected bound-source save preserving configuration/SQLite bytes. The selected
+Collector was normally stopped and resumed for installation; stopped data/key
+fingerprints matched. The reopened UI detects America/New_York and retains the
+original saved manual mode and blank source zone until an approved change is
+applied. Source interpretation and historical daily data were not changed.
 
 ## Local removal — 6 November 2026
 

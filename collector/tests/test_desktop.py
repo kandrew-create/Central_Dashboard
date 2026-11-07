@@ -51,6 +51,35 @@ class DesktopFormTests(unittest.TestCase):
         self.assertEqual(values[5:8], ("Unknown", "No", "Missing"))
 
 
+class SourceTimezoneSaveTests(unittest.TestCase):
+    def test_bound_timezone_change_is_rejected_before_config_or_queue_changes(self):
+        from collector.collection import binding
+        from collector.state import State
+        with tempfile.TemporaryDirectory() as folder:
+            service = DesktopService()
+            config = service.save(default_config(Path(folder) / 'setup/config.toml'))
+            state = State(config)
+            state.put('binding', binding(config))
+            state.close()
+            original_config = config.path.read_bytes()
+            original_state = config.state_path.read_bytes()
+            with self.assertRaisesRegex(CollectorError, 'provisioned new generation'):
+                service.save(replace(config, timezone='America/New_York', use_pc_timezone=True), config)
+            self.assertEqual(config.path.read_bytes(), original_config)
+            self.assertEqual(config.state_path.read_bytes(), original_state)
+
+    def test_uncollected_setup_can_save_pc_local_choice_and_later_choose_manual(self):
+        with tempfile.TemporaryDirectory() as folder:
+            service = DesktopService()
+            config = service.save(default_config(Path(folder) / 'setup/config.toml'))
+            local = service.save(replace(config, timezone='America/New_York', use_pc_timezone=True), config)
+            self.assertTrue(local.use_pc_timezone)
+            self.assertEqual(local.timezone, 'America/New_York')
+            manual = service.save(replace(local, use_pc_timezone=False), local)
+            self.assertFalse(manual.use_pc_timezone)
+            self.assertEqual(manual.timezone, 'America/New_York')
+
+
 @unittest.skipUnless(os.name == "nt", "requires actual Windows private-file ACLs")
 class DesktopPersistenceTests(unittest.TestCase):
     def setUp(self):

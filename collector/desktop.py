@@ -1,6 +1,8 @@
 """Desktop operations shared with the CLI; no GUI or database work at import time."""
 from dataclasses import replace
+from contextlib import closing
 import json
+import sqlite3
 import tomllib
 
 from collector import secrets
@@ -13,7 +15,7 @@ EDITABLE_FIELDS = ("host", "port", "database", "user", "sslmode", "timezone",
                    "marker_verified", "scan_mode", "history_start", "history_end", "all_history", "page_rows", "max_pages",
                    "overlap_seconds", "reconcile_ids", "queue_bytes", "min_free_bytes", "privacy", "upload_url", "upload_enabled",
                    "interval_seconds", "schedule_mode", "schedule_timezone", "schedule_time", "schedule_weekday", "upload_ca_file",
-                   "status_refresh_minutes")
+                   "status_refresh_minutes", "use_pc_timezone")
 
 COLLECTION_FIELDS = EDITABLE_FIELDS[9:24]
 UPLOAD_FIELDS = ('upload_url', 'upload_enabled', 'upload_ca_file')
@@ -33,7 +35,8 @@ def config_document(config):
                      "statement_timeout_ms": config.statement_timeout_ms,
                      "lock_timeout_ms": config.lock_timeout_ms},
         "source": {"profile": PROFILE, "schema": config.schema, "alarm_table": config.alarm_table,
-                   "event_table": config.event_table, "timezone": config.timezone},
+                   "event_table": config.event_table, "timezone": config.timezone,
+                   "use_pc_timezone": config.use_pc_timezone},
         "limits": {"preview_rows": config.preview_rows, "max_field_bytes": config.max_field_bytes,
                    "max_output_bytes": config.max_output_bytes},
         "collection": {name: getattr(config, name) for name in COLLECTION_FIELDS},
@@ -127,6 +130,17 @@ class DesktopService:
             if previous.path != config.path:
                 raise CollectorError("Create a new setup to save in a different location.")
             require_current(previous)
+            if (previous.timezone != config.timezone and previous.generation_id == config.generation_id
+                    and previous.state_path.is_file()):
+                try:
+                    with closing(sqlite3.connect(previous.state_path.as_uri() + '?mode=ro', uri=True)) as db:
+                        bound = db.execute("SELECT 1 FROM meta WHERE key='binding'").fetchone()
+                except sqlite3.Error:
+                    raise CollectorError('Cannot review existing source state. Settings and queue were retained.') from None
+                if bound:
+                    raise CollectorError('This source already collected records with its saved timezone. '
+                                         'Apply a provisioned new generation before saving a different source timezone. '
+                                         'Original settings, checkpoints and pending uploads were retained.')
             if config.path.is_symlink():
                 raise CollectorError("Settings files must not be symbolic links.")
             secrets.write_private_file(config.path, content.encode("utf-8"))

@@ -32,13 +32,19 @@ The shortcut and Windows GUI share the explicit application identity `Linker.SCA
 4. Import the encrypted Central Server setup to supply its HTTPS destination, upload credential and CA. The fixed URL has no visible editor and Test server does not echo it. Stored keys stay encrypted and hidden; a manually supplied replacement credential uses a masked entry that is cleared after storage. Certificate/hostname verification remains enabled. Save settings and use **Test server** on the actual Collector PC.
 5. Use **Start Collector** to run the saved Docker schedule. **Stop Collector** stops that container normally after bounded work, retaining pending uploads. With it stopped, **Collect now** runs one bounded Docker cycle using the same configuration and queue. On **Collection & upload**, set **Status refresh (minutes)** and save: the default is 1 minute, 0 selects manual refresh, and the maximum is 1440. This changes only the status display; the collection/upload schedule remains separate. **Refresh status** remains available. Closing the GUI leaves the scheduled container running. Closing during a manual one-off requests cancellation and waits for bounded work to finish.
 
-The Docker-only Windows launcher detects the Windows timezone and converts it to
-an IANA name for the next-run display. **Use Windows zone for schedule** copies
-that zone into the schedule form for explicit saving. **Use Windows zone for
-source** is appropriate for a new setup only when SCADA records that PC's Windows
-local time. An assigned source needs a reviewed new generation before its source
-timezone changes. Uploaded original timestamps and separate milliseconds are
-preserved; a blank source zone stays unknown, regardless of Docker's clock.
+On **Connection & setup**, **Use this SCADA PC's local timezone** is a saved
+checkbox. Checked captures the detected Windows/IANA timezone and disables manual
+timezone entry; unchecked enables the manual source timezone field. Save settings
+to apply the choice. Use PC-local mode only when SCADA records this PC's Windows
+local time. The choice persists as `[source].use_pc_timezone`; the resolved IANA
+zone persists as `[source].timezone`, so reopening or later Windows clock changes
+do not silently reinterpret source history. The screen distinguishes selected
+and saved source zones. A source that already collected records needs a reviewed
+new generation before its effective source timezone changes; a rejected save
+retains settings and queued data. **Use Windows zone for schedule** separately
+copies the zone into the schedule form for explicit saving. Original timestamps
+and separate milliseconds remain preserved; a blank saved source zone remains
+unknown, regardless of Docker's clock.
 Existing uploads are not corrected by reopening the interface. See
 [timezone and daily reporting](../docs/collector-container-desktop.md#refresh-and-windows-timezone--7-november-2026).
 

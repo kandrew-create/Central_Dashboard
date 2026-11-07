@@ -41,20 +41,38 @@ class DockerManagerWindowTests(unittest.TestCase):
         self.service.status.assert_not_called()
         self.service.start.assert_not_called()
 
-    def test_detected_windows_zone_is_explicit_and_cannot_replace_assigned_source_zone(self):
+    def test_pc_timezone_checkbox_selects_detected_zone_and_unchecking_allows_manual_zone(self):
         with patch.dict('os.environ', COLLECTOR_WINDOWS_TIMEZONE='America/New_York'):
             self.app._use_windows_timezone('schedule_timezone')
             self.assertEqual(self.app.variables['schedule_timezone'].get(), 'America/New_York')
             self.assertEqual(self.app.variables['timezone'].get(), '')
-            self.app.saved = replace(self.config, source_id='11111111-1111-4111-8111-111111111111')
-            with patch('collector.docker_gui.messagebox.showinfo') as info:
-                self.app._use_windows_timezone('timezone')
-            info.assert_called_once()
-            self.assertEqual(self.app.variables['timezone'].get(), '')
-            self.service.save.assert_not_called()
-            self.app.saved = self.config
-            self.app._use_windows_timezone('timezone')
+            self.app.pc_timezone_check.invoke()
+            self.assertEqual(self.app.variables['use_pc_timezone'].get(), 'True')
             self.assertEqual(self.app.variables['timezone'].get(), 'America/New_York')
+            self.assertTrue(self.app.fields['timezone'][1].instate(('disabled',)))
+            self.assertIn('Saved source zone: Unknown', self.app.timezone_summary.get())
+            self.service.save.assert_not_called()
+            self.app.pc_timezone_check.invoke()
+            self.assertEqual(self.app.variables['use_pc_timezone'].get(), 'False')
+            self.assertFalse(self.app.fields['timezone'][1].instate(('disabled',)))
+            self.app.variables['timezone'].set('Europe/London')
+            self.assertEqual(self.app.variables['timezone'].get(), 'Europe/London')
+
+    def test_pc_timezone_choice_roundtrips_and_host_changes_do_not_reinterpret_saved_source(self):
+        configured = replace(self.config, use_pc_timezone=True, timezone='America/New_York')
+        with patch.dict('os.environ', COLLECTOR_WINDOWS_TIMEZONE='Asia/Tokyo'):
+            self.app._settings_loaded(configured)
+            self.assertEqual(self.app.variables['use_pc_timezone'].get(), 'True')
+            self.assertEqual(self.app.variables['timezone'].get(), 'America/New_York')
+            self.assertTrue(self.app.fields['timezone'][1].instate(('disabled',)))
+            self.assertFalse(self.app._is_dirty())
+
+    def test_missing_pc_timezone_cannot_save_an_automatic_guess(self):
+        with patch.dict('os.environ', COLLECTOR_WINDOWS_TIMEZONE=''):
+            self.app.pc_timezone_check.invoke()
+        self.assertEqual(self.app.variables['use_pc_timezone'].get(), 'False')
+        self.assertEqual(self.app.variables['timezone'].get(), '')
+        self.assertIn('unavailable', self.app.status.get())
 
     def test_identity_references_are_read_only_and_save_preserves_full_ids(self):
         for name in ('source_id', 'generation_id'):

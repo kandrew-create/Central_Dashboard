@@ -221,8 +221,15 @@ class CollectorWindow:
         self._entry(form, "user", 3, 1, "Read-only username")
         self._entry(form, "sslmode", 5, 0, "Database TLS", values=("disable", "require", "verify-ca", "verify-full"))
         self._entry(form, "timezone", 5, 1, "Source timezone (IANA)")
-        ttk.Label(form, text="Leave timezone blank if unknown. Unencrypted access is limited to this PC.",
-                  style="Muted.TLabel", wraplength=590).grid(row=7, column=0, columnspan=2, sticky="w", pady=(9, 12))
+        timezone_settings = ttk.Frame(form, style='Card.TFrame')
+        timezone_settings.grid(row=7, column=0, columnspan=2, sticky='ew', pady=(9, 12))
+        self.pc_timezone_check = ttk.Checkbutton(timezone_settings,
+                text="Use this SCADA PC's local timezone", variable=self.variables['use_pc_timezone'],
+                onvalue='True', offvalue='False', command=self._pc_timezone_changed, style='Card.TCheckbutton')
+        self.pc_timezone_check.pack(anchor='w')
+        self.controls.append((self.pc_timezone_check, 'normal'))
+        ttk.Label(timezone_settings, text='Checked: capture Windows timezone. Unchecked: enter the source timezone above.\n'
+                  'Leave the manual timezone blank only when unknown.', style='Muted.TLabel', wraplength=590).pack(anchor='w')
         ttk.Separator(form).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(0, 4))
         self._entry(form, "schema", 9, 0, "Approved schema")
         mapping = ttk.Frame(form, style="Card.TFrame")
@@ -346,7 +353,7 @@ class CollectorWindow:
                   'upload_ca_file':'Trusted upload CA file (blank uses public CAs)',
                   'schedule_weekday':'Weekly day (Monday=0, Sunday=6)',
                   'status_refresh_minutes':'Status refresh (minutes; 0 = manual, max 1440)'}
-        for index, name in enumerate(name for name in EDITABLE_FIELDS[9:] if name != 'upload_url'):
+        for index, name in enumerate(name for name in EDITABLE_FIELDS[9:] if name not in ('upload_url', 'use_pc_timezone')):
             if name in self.identity_references:
                 row, column = (index//2)*2, index%2
                 caption = ttk.Label(form, text=labels[name], style='Card.TLabel')
@@ -530,6 +537,11 @@ class CollectorWindow:
         self.location.set('Docker: /var/lib/linker-collector/setup/config.toml' if self.docker_managed else str(config.path))
         self.loading = False
         self._sync_schedule_fields()
+        self._sync_pc_timezone()
+
+    def _sync_pc_timezone(self):
+        self.fields['timezone'][1].configure(state='disabled' if self.busy or
+                self.variables['use_pc_timezone'].get() == 'True' else 'normal')
 
     def _credential_present(self, kind):
         if self.docker_managed:
@@ -553,6 +565,7 @@ class CollectorWindow:
         self._sync_schedule_fields()
         for control, state in self.controls:
             control.configure(state="disabled" if self.busy else state)
+        self._sync_pc_timezone()
         saved = not self._is_dirty()
         has_password = saved and self._credential_present('database')
         self.password_button.configure(state="normal" if saved and not self.busy else "disabled")
@@ -747,6 +760,20 @@ class CollectorWindow:
             self.status.set("Settings saved. Store a password, then test the connection.")
 
         self._start("Saving local settings…", lambda: self.service.save(config, previous), saved)
+
+    def _pc_timezone_changed(self):
+        if self.variables['use_pc_timezone'].get() == 'True':
+            from collector.time_display import windows_timezone
+            name = windows_timezone()
+            if not name:
+                self.variables['use_pc_timezone'].set('False')
+                self.status.set('Windows timezone is unavailable. Enter the verified source timezone manually.')
+                return
+            self.variables['timezone'].set(name)
+            self.status.set('PC local timezone selected: ' + name + '. Save settings to apply it.')
+        else:
+            self.status.set('Manual source timezone selected. Enter its IANA name and save settings.')
+        self._refresh_actions()
 
     def store_password(self):
         if self.busy or self._is_dirty():

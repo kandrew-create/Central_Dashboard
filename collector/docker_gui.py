@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 
 from collector.gui import CollectorWindow
 from deploy.collector.desktop import DockerDesktopService
@@ -26,17 +26,18 @@ class DockerCollectorWindow(CollectorWindow):
     def _update_timezone_summary(self):
         if hasattr(self, 'timezone_summary'):
             self.timezone_summary.set('Windows timezone: ' + (windows_timezone() or 'Unavailable') +
-                                      ' | Source timezone for uploads: ' + (self.variables['timezone'].get() or 'Unknown'))
+                                      ' | Selected source zone: ' + (self.variables['timezone'].get() or 'Unknown') +
+                                      (' (PC local)' if self.variables['use_pc_timezone'].get() == 'True' else ' (manual)') +
+                                      ' | Saved source zone: ' + ((self.saved.timezone if self.saved else '') or 'Unknown'))
 
     def _use_windows_timezone(self, field):
         name = windows_timezone()
         if not name:
             self.status.set('Windows timezone could not be detected. Enter the verified IANA timezone explicitly.')
             return
-        if field == 'timezone' and self.saved and self.saved.source_id and self.saved.timezone != name:
-            messagebox.showinfo('Source timezone review',
-                                'Windows uses ' + name + '. This existing source needs a reviewed new generation '
-                                'before changing timestamp interpretation. Existing uploads remain unchanged.', parent=self.root)
+        if field == 'timezone':
+            self.variables['use_pc_timezone'].set('True')
+            self._pc_timezone_changed()
             return
         self.variables[field].set(name)
         self.status.set('Windows timezone selected. Save settings to apply it.')
