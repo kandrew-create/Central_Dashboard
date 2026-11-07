@@ -75,6 +75,7 @@ class CollectorWindow:
         self._build()
         for variable in self.variables.values():
             variable.trace_add("write", self._form_changed)
+        self.variables['timezone'].trace_add('write', self._shared_timezone_changed)
         self.password.trace_add("write", self._password_changed)
         self.upload_token.trace_add('write',self._upload_token_changed)
         for variable in (self.table_choice, self.after_id, self.preview_limit, self.include_users):
@@ -117,6 +118,26 @@ class CollectorWindow:
         style.configure("Treeview.Heading", padding=(8, 10), background="#eaf0f7", foreground="#33465e",
                         font=(UI_FONT, 10, "bold"))
         style.configure("Card.TCheckbutton", background="white", foreground="#33465e")
+        self._checkbutton_images = []
+        for selected, disabled in ((False, False), (True, False), (False, True), (True, True)):
+            indicator = tk.PhotoImage(master=self.root, width=18, height=18)
+            background = '#e6ebf3' if disabled else ('#356ff0' if selected else '#ffffff')
+            border = '#cbd5e1' if disabled else ('#356ff0' if selected else '#a8b8cc')
+            indicator.put(background, to=(0, 0, 18, 18))
+            for bounds in ((0, 0, 18, 1), (0, 17, 18, 18), (0, 0, 1, 18), (17, 0, 18, 18)):
+                indicator.put(border, to=bounds)
+            if selected:
+                for x, y in ((4,8),(4,9),(5,9),(5,10),(6,10),(6,11),(7,11),(7,12),
+                             (8,10),(8,11),(9,9),(9,10),(10,8),(10,9),(11,7),(11,8),(12,6),(12,7),(13,5),(13,6)):
+                    indicator.put('#94a3b8' if disabled else '#ffffff', to=(x, y))
+            self._checkbutton_images.append(indicator)
+        empty, checked, disabled_empty, disabled_checked = self._checkbutton_images
+        style.element_create('Collector.Check.indicator', 'image', empty,
+                             ('disabled', 'selected', disabled_checked), ('disabled', disabled_empty), ('selected', checked))
+        style.layout('Card.TCheckbutton', [('Checkbutton.padding', {'sticky':'nswe', 'children':[
+            ('Collector.Check.indicator', {'side':'left', 'sticky':''}),
+            ('Checkbutton.focus', {'side':'left', 'sticky':'w', 'children':[
+                ('Checkbutton.label', {'sticky':'nswe'})]})]})])
         style.configure("Horizontal.TProgressbar", background="#4e83ef", troughcolor="#eaf0fc", borderwidth=0, thickness=5)
 
     def _button(self, parent, title, command, primary=False):
@@ -220,16 +241,16 @@ class CollectorWindow:
         self._entry(form, "database", 3, 0, "Database name")
         self._entry(form, "user", 3, 1, "Read-only username")
         self._entry(form, "sslmode", 5, 0, "Database TLS", values=("disable", "require", "verify-ca", "verify-full"))
-        self._entry(form, "timezone", 5, 1, "Source timezone (IANA)")
+        self._entry(form, "timezone", 5, 1, "Custom timezone (IANA)")
         timezone_settings = ttk.Frame(form, style='Card.TFrame')
         timezone_settings.grid(row=7, column=0, columnspan=2, sticky='ew', pady=(9, 12))
         self.pc_timezone_check = ttk.Checkbutton(timezone_settings,
-                text="Use this SCADA PC's local timezone", variable=self.variables['use_pc_timezone'],
+                text="Use this PC's local timezone (unchecked = Custom)", variable=self.variables['use_pc_timezone'],
                 onvalue='True', offvalue='False', command=self._pc_timezone_changed, style='Card.TCheckbutton')
         self.pc_timezone_check.pack(anchor='w')
         self.controls.append((self.pc_timezone_check, 'normal'))
-        ttk.Label(timezone_settings, text='Checked: capture Windows timezone. Unchecked: enter the source timezone above.\n'
-                  'Leave the manual timezone blank only when unknown.', style='Muted.TLabel', wraplength=590).pack(anchor='w')
+        ttk.Label(timezone_settings, text='One timezone for alarm timestamps and collection times.',
+                  style='Muted.TLabel', wraplength=590).pack(anchor='w')
         ttk.Separator(form).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(0, 4))
         self._entry(form, "schema", 9, 0, "Approved schema")
         mapping = ttk.Frame(form, style="Card.TFrame")
@@ -349,11 +370,11 @@ class CollectorWindow:
                   'reconcile_ids':'Recent ID reconciliation range', 'queue_bytes':'Local state quota (bytes)',
                   'min_free_bytes':'Minimum free disk space (bytes)', 'privacy':'Operator field policy',
                   'upload_url':'Fixed HTTPS upload URL', 'upload_enabled':'Enable uploads', 'interval_seconds':'Interval (seconds)',
-                  'schedule_mode':'Schedule', 'schedule_timezone':'Schedule timezone (IANA)', 'schedule_time':'Daily/weekly time (HH:MM)',
+                  'schedule_mode':'Schedule', 'schedule_time':'Daily/weekly time (HH:MM)',
                   'upload_ca_file':'Trusted upload CA file (blank uses public CAs)',
                   'schedule_weekday':'Weekly day (Monday=0, Sunday=6)',
                   'status_refresh_minutes':'Status refresh (minutes; 0 = manual, max 1440)'}
-        for index, name in enumerate(name for name in EDITABLE_FIELDS[9:] if name not in ('upload_url', 'use_pc_timezone')):
+        for index, name in enumerate(name for name in EDITABLE_FIELDS[9:] if name not in ('upload_url', 'use_pc_timezone', 'schedule_timezone')):
             if name in self.identity_references:
                 row, column = (index//2)*2, index%2
                 caption = ttk.Label(form, text=labels[name], style='Card.TLabel')
@@ -540,8 +561,17 @@ class CollectorWindow:
         self._sync_pc_timezone()
 
     def _sync_pc_timezone(self):
+        self.fields['timezone'][0].configure(text='Timezone (IANA)' if
+                self.variables['use_pc_timezone'].get() == 'True' else 'Custom timezone (IANA)')
         self.fields['timezone'][1].configure(state='disabled' if self.busy or
                 self.variables['use_pc_timezone'].get() == 'True' else 'normal')
+
+    def _shared_timezone_changed(self, *_args):
+        if self.loading:
+            return
+        zone = self.variables['timezone'].get()
+        if zone and self.variables['schedule_timezone'].get() != zone:
+            self.variables['schedule_timezone'].set(zone)
 
     def _credential_present(self, kind):
         if self.docker_managed:
@@ -770,9 +800,10 @@ class CollectorWindow:
                 self.status.set('Windows timezone is unavailable. Enter the verified source timezone manually.')
                 return
             self.variables['timezone'].set(name)
-            self.status.set('PC local timezone selected: ' + name + '. Save settings to apply it.')
+            self.status.set('Local timezone selected: ' + name + '. Save to apply it to alarms and collection.')
         else:
-            self.status.set('Manual source timezone selected. Enter its IANA name and save settings.')
+            self._shared_timezone_changed()
+            self.status.set('Custom timezone selected. Enter its IANA name and save for alarms and collection.')
         self._refresh_actions()
 
     def store_password(self):

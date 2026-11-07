@@ -43,20 +43,43 @@ class DockerManagerWindowTests(unittest.TestCase):
 
     def test_pc_timezone_checkbox_selects_detected_zone_and_unchecking_allows_manual_zone(self):
         with patch.dict('os.environ', COLLECTOR_WINDOWS_TIMEZONE='America/New_York'):
-            self.app._use_windows_timezone('schedule_timezone')
-            self.assertEqual(self.app.variables['schedule_timezone'].get(), 'America/New_York')
             self.assertEqual(self.app.variables['timezone'].get(), '')
             self.app.pc_timezone_check.invoke()
             self.assertEqual(self.app.variables['use_pc_timezone'].get(), 'True')
             self.assertEqual(self.app.variables['timezone'].get(), 'America/New_York')
+            self.assertEqual(self.app.variables['schedule_timezone'].get(), 'America/New_York')
             self.assertTrue(self.app.fields['timezone'][1].instate(('disabled',)))
-            self.assertIn('Saved source zone: Unknown', self.app.timezone_summary.get())
+            self.assertTrue(self.app.pc_timezone_check.instate(('selected',)))
+            self.assertIn('This PC', self.app.timezone_summary.get())
             self.service.save.assert_not_called()
             self.app.pc_timezone_check.invoke()
             self.assertEqual(self.app.variables['use_pc_timezone'].get(), 'False')
             self.assertFalse(self.app.fields['timezone'][1].instate(('disabled',)))
             self.app.variables['timezone'].set('Europe/London')
             self.assertEqual(self.app.variables['timezone'].get(), 'Europe/London')
+            self.assertEqual(self.app.variables['schedule_timezone'].get(), 'Europe/London')
+
+    def test_single_timezone_control_saves_both_and_hides_separate_controls(self):
+        self.assertNotIn('schedule_timezone', self.app.fields)
+        labels = [widget.cget('text') for widget, _ in self.app.controls if widget.winfo_class() == 'TButton']
+        self.assertNotIn('Use Windows zone for schedule', labels)
+        self.assertNotIn('Use Windows zone for source', labels)
+        self.app.variables['timezone'].set('Europe/London')
+        self.service.save.return_value = replace(self.config, timezone='Europe/London', schedule_timezone='Europe/London')
+        self.app.save_settings()
+        self.wait_idle()
+        candidate, previous = self.service.save.call_args.args
+        self.assertEqual(candidate.timezone, 'Europe/London')
+        self.assertEqual(candidate.schedule_timezone, 'Europe/London')
+        self.assertEqual(previous, self.config)
+
+    def test_legacy_different_timezones_are_not_changed_on_open_or_unrelated_edits(self):
+        legacy = replace(self.config, timezone='America/New_York', schedule_timezone='UTC')
+        self.app._settings_loaded(legacy)
+        self.assertEqual(self.app.variables['schedule_timezone'].get(), 'UTC')
+        self.assertFalse(self.app._is_dirty())
+        self.app.variables['database'].set('edited_scada')
+        self.assertEqual(self.app.variables['schedule_timezone'].get(), 'UTC')
 
     def test_pc_timezone_choice_roundtrips_and_host_changes_do_not_reinterpret_saved_source(self):
         configured = replace(self.config, use_pc_timezone=True, timezone='America/New_York')

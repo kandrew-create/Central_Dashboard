@@ -13,7 +13,7 @@ def windows_timezone():
 
 
 def next_run_text(stamp, schedule_timezone):
-    name = windows_timezone() or schedule_timezone
+    name = schedule_timezone
     if not stamp:
         return 'Not scheduled', name
     return datetime.fromtimestamp(stamp, ZoneInfo(name)).strftime('%Y-%m-%d %H:%M:%S %Z'), name

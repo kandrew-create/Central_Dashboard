@@ -6,7 +6,6 @@ from tkinter import ttk
 
 from collector.gui import CollectorWindow
 from deploy.collector.desktop import DockerDesktopService
-from collector.time_display import windows_timezone
 
 
 class DockerCollectorWindow(CollectorWindow):
@@ -17,30 +16,14 @@ class DockerCollectorWindow(CollectorWindow):
         bar.pack(fill='x', before=card.winfo_children()[1], pady=6)
         self.timezone_summary = tk.StringVar(self.root)
         ttk.Label(bar, textvariable=self.timezone_summary, style='Muted.TLabel', wraplength=1000).pack(anchor='w')
-        for field, caption in (('schedule_timezone', 'Use Windows zone for schedule'),
-                               ('timezone', 'Use Windows zone for source')):
-            button = self._button(bar, caption, lambda selected=field: self._use_windows_timezone(selected))
-            button.pack(side='left', padx=(0, 8), pady=4)
         self._update_timezone_summary()
 
     def _update_timezone_summary(self):
         if hasattr(self, 'timezone_summary'):
-            self.timezone_summary.set('Windows timezone: ' + (windows_timezone() or 'Unavailable') +
-                                      ' | Selected source zone: ' + (self.variables['timezone'].get() or 'Unknown') +
-                                      (' (PC local)' if self.variables['use_pc_timezone'].get() == 'True' else ' (manual)') +
-                                      ' | Saved source zone: ' + ((self.saved.timezone if self.saved else '') or 'Unknown'))
-
-    def _use_windows_timezone(self, field):
-        name = windows_timezone()
-        if not name:
-            self.status.set('Windows timezone could not be detected. Enter the verified IANA timezone explicitly.')
-            return
-        if field == 'timezone':
-            self.variables['use_pc_timezone'].set('True')
-            self._pc_timezone_changed()
-            return
-        self.variables[field].set(name)
-        self.status.set('Windows timezone selected. Save settings to apply it.')
+            mode = 'This PC' if self.variables['use_pc_timezone'].get() == 'True' else 'Custom'
+            zone = self.variables['timezone'].get() or 'Not configured'
+            self.timezone_summary.set('Timezone: ' + mode + ' · ' + zone + ' — used for alarms and collection. '
+                                      'Change it in Connection & setup.')
 
     def _form_changed(self, *args):
         super()._form_changed(*args)

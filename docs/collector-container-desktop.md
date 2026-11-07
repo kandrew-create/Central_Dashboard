@@ -186,23 +186,30 @@ needing a rewrite.
 
 The Windows launcher uses the installed ICU mapping to translate the Windows
 timezone into an IANA name and passes both names to the desktop container through
-WSL environment variables. Next-run display uses that zone explicitly, including
-daylight-saving rules; it does not depend on the container's system timezone.
-Missing/invalid detection falls back to the saved schedule timezone for display.
+WSL environment variables. The operator can select that zone in the common
+timezone control. Next-run display uses the saved choice explicitly, including
+custom-zone daylight-saving rules; it does not depend on the container's system
+timezone or override a custom choice with the detected Windows zone.
 Windows with daylight-saving adjustment disabled is left undetected rather than
 assuming ordinary IANA rules. No source or schedule setting is changed on launch.
 The mapping uses [ICU's Windows timezone conversion](https://unicode-org.github.io/icu-docs/apidoc/dev/icu4c/ucal_8h.html).
 
-**Use Windows zone for schedule** explicitly fills the schedule form. The saved
-**Use this SCADA PC's local timezone** checkbox is on **Connection & setup**:
-checked captures the Windows/IANA zone and disables manual source-zone entry;
-unchecked enables manual entry. The **Use Windows zone for source** shortcut
-selects the same checkbox. Confirm that SCADA records Windows local timestamps
-before using it. Save the choice as `[source].use_pc_timezone` and the resolved
-snapshot as `[source].timezone`. Missing detection does not enable PC-local mode,
-and enabling that mode requires a valid captured timezone. Opening a saved setup
-does not recapture or alter its effective zone if Windows settings have changed.
-The summary distinguishes the selected form value from the saved source zone.
+There is one shared **Timezone** choice on **Connection & setup**:
+**Use this PC's local timezone** (selected shows **✓**), or unchecked for
+**Custom timezone (IANA)**. It applies to alarm timestamps and collection times.
+The separate schedule timezone field and both Windows-copy buttons are removed.
+Selecting local time or editing/selecting a custom zone updates `timezone` and
+`schedule_timezone` together in the form. Save settings to apply both. PC/custom
+mode remains in `[source].use_pc_timezone`, and the resolved IANA snapshot is
+saved in `[source].timezone` and `[schedule].schedule_timezone`.
+
+The checkbox uses an application-owned Tk indicator with a tick instead of the
+Clam theme's cross, including disabled/selected states. No image dependency or
+customer files are added. Confirm SCADA records Windows local timestamps before
+using PC mode. Missing detection does not enable PC-local mode, and that mode
+requires a valid captured zone. Loading settings does not recapture Windows or
+align legacy different zones automatically; unrelated edits preserve them until
+the operator makes a timezone choice.
 
 Before writing settings, a read-only SQLite binding check rejects a changed
 effective timezone in an already-collected generation. It retains the original
@@ -244,6 +251,14 @@ Collector was normally stopped and resumed for installation; stopped data/key
 fingerprints matched. The reopened UI detects America/New_York and retains the
 original saved manual mode and blank source zone until an approved change is
 applied. Source interpretation and historical daily data were not changed.
+
+The final single-control/checkmark update passed **120 Windows checks** and
+**85 Linux image checks**; five Windows-only checks were skipped on Linux.
+Tests cover syncing both timezone values on selection/save, preserving legacy
+differences on load/unrelated edits and displaying custom-zone next-run times.
+The rendered selected indicator was visually verified as a tick. The interface
+was installed after normal closure, with matching stopped data/key fingerprints
+and the existing schedule resumed. Saved timezone interpretation remains intact.
 
 ## Local removal — 6 November 2026
 
