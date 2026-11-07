@@ -48,7 +48,14 @@ class AlarmWarehouseTests(PostgresCase):
         self.assertNotIn('confirmed_equipment',result['summary'])
         self.assertNotIn('unmapped',result['summary'])
         self.assertEqual(result['summary']['uncertain_time'], 1)
-        self.assertEqual(result['daily'], [dict(day='2026-10-20', occurrences=1)])
+        self.assertEqual(len(result['daily']),2)
+        dated,undated=result['daily']
+        self.assertEqual((dated['day'],dated['record_type'],dated['description'],dated['equipment_name'],dated['occurrences']),
+                         ('2026-10-20','Alarm','Conveyor VFD Connect Error','Conveyor VFD',1))
+        self.assertEqual((undated['day'],undated['description'],undated['equipment_name'],undated['occurrences']),
+                         (None,'Communication Error',None,1))
+        self.assertTrue(all(row['customer_id']==uid(1) and row['source_id']==uid(6) for row in result['daily']))
+        self.assertFalse(result['daily_truncated'])
         issue = next(row for row in result['issues'] if row['message'] == 'Conveyor VFD Connect Error')
         self.assertNotIn('confirmed_equipment',issue)
         self.assertEqual(issue['ai_suggestions'], 'Conveyor VFD')

@@ -77,6 +77,19 @@ class EquipmentOverrideTests(PostgresCase):
         self.assertEqual(actions,['equipment_override_saved','equipment_override_cleared'])
         self.assertEqual(self.evidence(),before)
 
+    def test_daily_rows_use_human_override_and_revert_to_saved_ai_without_guessing_date(self):
+        before=self.evidence()
+        self.save('Reviewed conveyor')
+        with patch('server.machine_ai.LocalModel') as model:
+            row=report(self.db,days=0,customer_id=uid(1))['daily'][0]
+            self.assertEqual((row['equipment_name'],row['equipment_origin'],row['description'],row['day']),
+                             ('Reviewed conveyor','manual','Conveyor VFD Connect Error',None))
+            self.save(None,1)
+            row=report(self.db,days=0,source_id=uid(6))['daily'][0]
+            self.assertEqual((row['equipment_name'],row['equipment_origin']),('Conveyor VFD','ai'))
+            model.assert_not_called()
+        self.assertEqual(self.evidence(),before)
+
     def test_ai_rerun_and_future_matching_alarms_cannot_replace_human_edit(self):
         self.save('User equipment')
         self.db.execute("UPDATE platform.machine_interpretations SET candidates='[{\"label\":\"Different AI\",\"field\":\"al_message\"}]'")

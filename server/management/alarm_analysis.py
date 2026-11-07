@@ -19,6 +19,17 @@ def report(db, days=30, source_id=None, customer_id=None):
     overrides=('LEFT JOIN platform.alarm_equipment_overrides o ON o.customer_id=f.customer_id '
                'AND o.source_id=f.source_id AND saved_ai.original_matches AND o.condition_key='+condition_sql('f')) if editing else ''
     override_fields='o.equipment_label equipment_override,COALESCE(o.version,0) override_version' if editing else 'NULL::text equipment_override,0::bigint override_version'
+    events = ''
+    if db.execute("SELECT to_regclass('warehouse.fact_event_occurrence') relation").fetchone()['relation'] is not None:
+        events = '''UNION ALL
+            SELECT f.customer_id,f.source_id,s.name,f.occurrence_date_utc,'Event',f.message,
+                f.registered_machine_tag,
+                CASE WHEN f.registered_machine_tag IS NOT NULL THEN 'registered' ELSE 'unavailable' END
+            FROM warehouse.fact_event_occurrence f
+            JOIN warehouse.dim_source s USING(customer_id,source_id)
+            WHERE (%(days)s=0 OR f.first_saved_at>=statement_timestamp()-(%(days)s * interval '1 day'))
+              AND (%(source)s::uuid IS NULL OR f.source_id=%(source)s::uuid)
+              AND (%(customer)s::uuid IS NULL OR f.customer_id=%(customer)s::uuid)'''
     result = db.execute(f'''WITH selected AS MATERIALIZED (
             SELECT f.*,s.name source_name,
                 {condition_sql('f')} condition_key,{override_fields},
@@ -52,10 +63,22 @@ def report(db, days=30, source_id=None, customer_id=None):
                 count(*) FILTER (WHERE source_time_uncertain) uncertain_time
             FROM selected GROUP BY customer_id,source_id,source_name,tag,message,condition_key,equipment_override,override_version
             ORDER BY count(*) DESC,source_name,source_id,tag NULLS LAST,message NULLS LAST LIMIT 50
+        ), activity AS (
+            SELECT customer_id,source_id,source_name,occurrence_date_utc AS day,'Alarm' record_type,
+                message description,COALESCE(equipment_override,ai_suggestion) equipment_name,
+                CASE WHEN equipment_override IS NOT NULL THEN 'manual'
+                    WHEN ai_suggestion IS NOT NULL THEN 'ai' ELSE 'unavailable' END equipment_origin
+            FROM selected
+            {events}
+        ), daily_groups AS (
+            SELECT customer_id,source_id,source_name,day,record_type,description,equipment_name,
+                equipment_origin,count(*) occurrences
+            FROM activity
+            GROUP BY customer_id,source_id,source_name,day,record_type,description,equipment_name,equipment_origin
         ), daily AS (
-            SELECT occurrence_date_utc AS day,count(*) occurrences FROM selected
-            WHERE occurrence_date_utc IS NOT NULL GROUP BY occurrence_date_utc
-            ORDER BY occurrence_date_utc DESC LIMIT 366
+            SELECT * FROM daily_groups
+            ORDER BY day DESC NULLS LAST,occurrences DESC,source_name,customer_id,source_id,
+                record_type,description NULLS LAST,equipment_name NULLS LAST,equipment_origin LIMIT 1000
         )
         SELECT jsonb_build_object(
             'summary',(SELECT jsonb_build_object('occurrences',count(*),
@@ -63,7 +86,8 @@ def report(db, days=30, source_id=None, customer_id=None):
                 'uncertain_order',count(*) FILTER (WHERE ordering_uncertain),
                 'uncertain_time',count(*) FILTER (WHERE source_time_uncertain)) FROM selected),
             'issues',COALESCE((SELECT jsonb_agg(to_jsonb(issues)) FROM issues),'[]'::jsonb),
-            'daily',COALESCE((SELECT jsonb_agg(to_jsonb(daily)) FROM daily),'[]'::jsonb)) report''',
+            'daily',COALESCE((SELECT jsonb_agg(to_jsonb(daily)) FROM daily),'[]'::jsonb),
+            'daily_truncated',(SELECT count(*)>1000 FROM daily_groups)) report''',
                       dict(days=days, source=source, customer=customer)).fetchone()['report']
     result['equipment_editing_available']=editing
     if db.execute("SELECT to_regclass('warehouse.refresh_queue') relation").fetchone()['relation'] is None:

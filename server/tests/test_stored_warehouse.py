@@ -184,6 +184,27 @@ class StoredWarehouseTests(PostgresCase):
         self.assertEqual(self.value('''SELECT count(*),bool_and(machine_id IS NULL),
             string_agg(registered_machine_tag,',') FROM warehouse.fact_event_occurrence'''),'1|t|LINE-01')
         self.assertEqual(self.value('SELECT calendar_date FROM warehouse.dim_date'),'2026-10-20')
+        with psycopg.connect(dbname=self.database,row_factory=dict_row) as db,patch('server.machine_ai.LocalModel') as model:
+            rows=report(db,days=0,customer_id=uid(1))['daily']
+            event=next(row for row in rows if row['record_type']=='Event')
+            self.assertEqual((event['day'],event['description'],event['equipment_name'],event['equipment_origin'],event['occurrences']),
+                             ('2026-10-20','Message is not equipment','LINE-01','registered',1))
+            self.assertEqual(sum(row['occurrences'] for row in rows),3)
+            self.assertEqual(report(db,days=0,customer_id=uid(101))['daily'],[])
+            self.assertEqual(report(db,days=0,source_id=uid(106))['daily'],[])
+            model.assert_not_called()
+
+    def test_daily_event_without_registered_identity_does_not_infer_equipment_from_message(self):
+        self.add_event()
+        self.refresh()
+        with psycopg.connect(dbname=self.database,row_factory=dict_row) as db:
+            event=next(row for row in report(db,days=0)['daily'] if row['record_type']=='Event')
+            self.assertIsNone(event['equipment_name'])
+            self.assertEqual(event['equipment_origin'],'unavailable')
+        self._run("UPDATE platform.alarm_event_revisions SET received_at=now()-interval '100 days' WHERE source_table='eventhistory'")
+        self.refresh()
+        with psycopg.connect(dbname=self.database,row_factory=dict_row) as db:
+            self.assertTrue(all(row['record_type']=='Alarm' for row in report(db,days=30)['daily']))
 
     def test_event_equal_marker_conflicts_do_not_pick_an_arrival_winner(self):
         self.add_event()

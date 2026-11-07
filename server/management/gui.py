@@ -89,7 +89,7 @@ class ManagerWindow:
         outer=ttk.Frame(self.root,padding=22);outer.pack(fill='both',expand=True)
         self.notebook=ttk.Notebook(outer)
         tabs=[ttk.Frame(self.notebook,padding=16) for _ in range(5)]
-        for tab,name in zip(tabs,('1  Server status','2  Register SCADA source','3  Sources & collector setup','4  Connection & mode','5  Equipment Identification')):
+        for tab,name in zip(tabs,('1  Server status','2  Register SCADA source','3  Sources & collector setup','4  Connection & mode','5  Analysis')):
             self.notebook.add(tab,text=name)
         self._status_tab(tabs[0]);self._registration_tab(tabs[1]);self._sources_tab(tabs[2])
         self._connection_tab(tabs[3])
@@ -124,7 +124,7 @@ class ManagerWindow:
 
     def _ai_tab(self,parent):
         card=ttk.Frame(parent,style='Card.TFrame',padding=20);card.pack(fill='both',expand=True)
-        ttk.Label(card,text='Equipment Identification',style='Title.TLabel').pack(anchor='w')
+        ttk.Label(card,text='Analysis',style='Title.TLabel').pack(anchor='w')
         ttk.Label(card,text='Uses an AI model installed locally on this Central Server PC to suggest equipment names from alarm messages/tags. '
                   'Events use an existing authorized machine assignment, without AI; unassigned events remain uncertain. '
                   'Original logs stay unchanged. Equipment names are suggestions; unknown or ambiguous '

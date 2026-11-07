@@ -188,7 +188,10 @@ class ModernDockerWindowTests(unittest.TestCase):
                                    uncertain_time=1, uncertain_order=1, unmapped=1),
                       issues=[dict(source_name='Fixture source', tag='TAG', message='Conveyor VFD Connect Error',
                                    occurrences=1, confirmed_equipment='LINE-01', ai_suggestions='Conveyor VFD')],
-                      daily=[dict(day='2026-10-20', occurrences=1)])
+                      daily=[dict(day='2026-10-20',record_type='Alarm',source_name='Fixture source',
+                                  description='Conveyor VFD Connect Error',equipment_name='Conveyor VFD',equipment_origin='ai',occurrences=1),
+                             dict(day=None,record_type='Event',source_name='Other source',description='Operator <Start>',
+                                  equipment_name='LINE-01',equipment_origin='registered',occurrences=2)])
         self.service.alarm_analysis.side_effect = lambda **kwargs: threads.append(threading.get_ident()) or result
         self.app.navigate(4)
         self.wait_idle()
@@ -199,6 +202,13 @@ class ModernDockerWindowTests(unittest.TestCase):
         self.assertNotIn('mapping',self.app.analysis_summary.text().lower())
         self.assertNotIn('mapping',self.app.analysis_note.text().lower())
         self.assertIn('2 alarm occurrences', self.app.analysis_summary.text())
+        self.assertEqual(self.app.analysis_daily.columnCount(),7)
+        self.assertEqual([self.app.analysis_daily.item(0,column).text() for column in range(6)],
+                         ['2026-10-20','Alarm','Fixture source','Conveyor VFD Connect Error','Conveyor VFD','1'])
+        self.assertEqual([self.app.analysis_daily.item(1,column).text() for column in range(6)],
+                         ['Uncertain date','Event','Other source','Operator <Start>','LINE-01','2'])
+        self.assertIn('Unverified',self.app.analysis_daily.item(0,4).toolTip())
+        self.assertEqual(self.app.analysis_daily.item(1,4).toolTip(),'Registered source machine tag')
         self.service.enable_machine_ai.assert_not_called()
         self.app.analysis_days.setCurrentIndex(2)
         self.assertEqual(self.app.analysis_issues.rowCount(), 0)
@@ -539,9 +549,11 @@ class ModernDockerWindowTests(unittest.TestCase):
     def test_identification_page_removed_and_ai_controls_live_in_analysis(self):
         from server.management.qt_docker_gui import PAGES
         self.assertEqual(self.app.pages.count(),5)
-        self.assertEqual([page[0] for page in PAGES],['Overview','Register source','Sources & setup','Deployment','Alarm analysis'])
+        self.assertEqual([page[0] for page in PAGES],['Overview','Register source','Sources & setup','Deployment','Analysis'])
+        self.assertEqual(self.app.nav_buttons[4].text(),'Analysis')
         self.assertFalse(hasattr(self.app,'ai_table'))
         self.app.navigate(4);self.wait_idle()
+        self.assertEqual(self.app.page_title.text(),'Analysis')
         self.assertFalse(self.app.ai_settings_panel.isVisible())
         self.app.ai_settings_panel.show()
         self.assertTrue(self.app.ai_model.isVisible())

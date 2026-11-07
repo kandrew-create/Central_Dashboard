@@ -26,7 +26,7 @@ PAGES = (
     ('Register source', 'Connect a SCADA database source to this server.', 'register'),
     ('Sources & setup', 'Manage registrations and export collector setup files.', 'sources'),
     ('Deployment', 'Your Linux workspace and Docker server connection.', 'deployment'),
-    ('Alarm analysis', 'Recurring alarms, daily trends and equipment evidence.', 'overview'),
+    ('Analysis', 'Recurring alarms, daily alarm/event activity and equipment evidence.', 'overview'),
 )
 
 
@@ -261,7 +261,7 @@ class DockerManagerWindow(QMainWindow):
         self.navigation = QButtonGroup(self)
         self.nav_buttons = []
         for index, (title, _, symbol) in enumerate(PAGES):
-            button = QPushButton(('Identification' if index == 4 else title).replace('&', '&&'))
+            button = QPushButton(title.replace('&', '&&'))
             button.setObjectName('nav')
             button.setIcon(icon(symbol))
             button.setCheckable(True)
@@ -649,7 +649,7 @@ class DockerManagerWindow(QMainWindow):
         self.analysis_source.addItem('All sources', None)
         self.analysis_days = QComboBox()
         for days in (7, 30, 90, 365, 0):
-            self.analysis_days.addItem(f'First saved in last {days} days' if days else 'All saved alarms', days)
+            self.analysis_days.addItem(f'First saved in last {days} days' if days else 'All saved alarms / events', days)
         self.analysis_days.setCurrentIndex(1)
         for widget in (self.analysis_customer, self.analysis_source, self.analysis_days):
             self.controls.append(widget)
@@ -673,13 +673,15 @@ class DockerManagerWindow(QMainWindow):
         box.addWidget(self.analysis_issues, 2)
         self.edit_equipment_button=self.button('Edit / override equipment',self.edit_equipment,'primary')
         box.addWidget(self.edit_equipment_button)
-        box.addWidget(label('DAILY ALARM OCCURRENCES · KNOWN SOURCE START DATES IN UTC', 'eyebrow'))
-        self.analysis_daily = self._table(('UTC DAY', 'OCCURRENCES', 'RELATIVE ACTIVITY'))
+        box.addWidget(label('DAILY ALARM / EVENT OCCURRENCES', 'eyebrow'))
+        self.analysis_daily = self._table(('UTC DAY', 'TYPE', 'SOURCE', 'ALARM / EVENT DESCRIPTION',
+                                           'EQUIPMENT NAME', 'OCCURRENCES', 'RELATIVE ACTIVITY'))
         self.analysis_daily.setMinimumHeight(125)
         box.addWidget(self.analysis_daily, 1)
         box.addWidget(label('The time filter uses when an occurrence was first saved by Central Server. '
-                            'Daily trends use verified source start dates; unknown or conflicting source times are excluded. '
-                            'Backfilled alarms may have older source dates. No alarm durations or current states are inferred. '
+                            'Daily rows use verified source dates; unknown or conflicting times appear as Uncertain date. '
+                            'Up to 1,000 groups are shown, newest known dates first. Hover over equipment for its origin. '
+                            'Backfilled records may have older source dates. No durations or current states are inferred. '
                             'Retained history from removed sources is included in all-source totals.', 'help', True))
         layout.addWidget(frame)
         return page
@@ -750,7 +752,9 @@ class DockerManagerWindow(QMainWindow):
                                       f"{summary['saved_versions']:,} saved versions")
         self.analysis_note.setText(f"{summary['uncertain_time']:,} occurrences have uncertain source times; "
                                    f"{summary['uncertain_order']:,} have uncertain revision order. "
-                                   'AI suggestions are unverified equipment labels, not diagnosed causes.')
+                                   'AI suggestions are unverified equipment labels, not diagnosed causes.' +
+                                   (' Daily rows are limited to 1,000 groups; narrow the filters to see more.'
+                                    if result.get('daily_truncated') else ''))
         self.analysis_issues.setRowCount(len(result['issues']))
         self.analysis_rows=result['issues']
         for index, row in enumerate(result['issues']):
@@ -764,13 +768,20 @@ class DockerManagerWindow(QMainWindow):
         self.analysis_daily.setRowCount(len(result['daily']))
         largest = max((row['occurrences'] for row in result['daily']), default=1)
         for index, row in enumerate(result['daily']):
-            self.analysis_daily.setItem(index, 0, QTableWidgetItem(str(row['day'])))
-            self.analysis_daily.setItem(index, 1, QTableWidgetItem(str(row['occurrences'])))
+            values=(row['day'] or 'Uncertain date',row.get('record_type','Alarm'),
+                    row.get('source_name'),row.get('description'),row.get('equipment_name'),row['occurrences'])
+            for column,value in enumerate(values):
+                item=QTableWidgetItem(str(value) if value is not None else 'Uncertain / unavailable')
+                item.setToolTip(item.text())
+                self.analysis_daily.setItem(index,column,item)
+            origin={'manual':'Edited by user','ai':'Unverified saved AI suggestion',
+                    'registered':'Registered source machine tag','unavailable':'Uncertain / unavailable'}
+            self.analysis_daily.item(index,4).setToolTip(origin.get(row.get('equipment_origin'),'Uncertain / unavailable'))
             bar = QProgressBar()
             bar.setRange(0, 1000)
             bar.setValue(round(row['occurrences'] * 1000 / largest))
             bar.setTextVisible(False)
-            self.analysis_daily.setCellWidget(index, 2, bar)
+            self.analysis_daily.setCellWidget(index, 6, bar)
         self.footer.setText('Alarm analysis updated from saved records. AI settings are unchanged.')
 
     def selected_alarm_group(self):
