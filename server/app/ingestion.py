@@ -22,20 +22,6 @@ def authorize(engine, token):
     return dict(result)
 
 
-def matching_rules(db, source_id, record):
-    row = record['original']
-    parameters = dict(source=source_id, kind=record['record_type'], tag=row.get('al_tag'), station=row.get('al_station', row.get('ev_station')),
-                      selection=row.get('al_selection'), group_code=row.get('al_group'), event_source=row.get('ev_source'))
-    return db.execute(text('''SELECT r.* FROM platform.mapping_rules r
-        JOIN platform.mapping_versions v USING(mapping_version_id)
-        WHERE r.source_id=:source AND v.status='approved' AND r.record_type=:kind
-        AND (r.tag IS NULL OR r.tag=:tag) AND (r.station IS NULL OR r.station=:station)
-        AND (r.selection IS NULL OR r.selection=:selection) AND (r.group_code IS NULL OR r.group_code=:group_code)
-        AND (r.event_source IS NULL OR r.event_source=:event_source)
-        AND v.version=(SELECT max(version) FROM platform.mapping_versions WHERE source_id=:source AND status='approved')
-        ORDER BY r.rule_id'''), parameters).mappings().all()
-
-
 def accept(engine, scope, batch, records):
     if str(scope['source_id']) != batch['source_id']:
         raise HTTPException(403, 'Source is outside credential scope')
@@ -54,10 +40,6 @@ def accept(engine, scope, batch, records):
             raise HTTPException(403, 'Generation is not authorized')
         allowed = [str(row[0]) for row in db.execute(text('SELECT machine_id FROM platform.credential_machines WHERE credential_id=:credential'),
                                                    {'credential': scope['credential_id']})]
-        for record in records:
-            matches = matching_rules(db, scope['source_id'], record)
-            if any(str(rule['machine_id']) not in allowed for rule in matches):
-                raise HTTPException(403, 'Machine is outside credential scope')
         upload_id = str(uuid4())
         receipt = dict(batch_id=batch['batch_id'], payload_hash=batch['payload_hash'], status='committed')
         payload = dict(batch=batch, allowed_machines=allowed, credential_id=str(scope['credential_id']))

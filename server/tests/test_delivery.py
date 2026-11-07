@@ -43,6 +43,7 @@ class DeliveryIntegrationTests(PostgresCase):
         cls._run((ROOT/'server/migrations/sql/0008_source_tables.sql').read_text(encoding='utf-8'))
         cls._run((ROOT/'server/migrations/sql/0009_source_schema_names.sql').read_text(encoding='utf-8'))
         cls._run((ROOT/'server/migrations/sql/0010_alarm_warehouse.sql').read_text(encoding='utf-8'))
+        cls._run('BEGIN;'+(ROOT/'server/migrations/sql/0015_source_scoped_processing.sql').read_text(encoding='utf-8')+'COMMIT;')
         cls.roles = ['api_'+uuid4().hex,'worker_'+uuid4().hex,'source_'+uuid4().hex]
         for role,capability in zip(cls.roles[:2],('scada_ingest','scada_worker')):
             cls._run(f'CREATE ROLE "{role}" LOGIN; GRANT {capability} TO "{role}";')
@@ -87,6 +88,39 @@ class DeliveryIntegrationTests(PostgresCase):
 
     def post(self,batch,token=None):
         return self.api.post('/v1/uploads',json=batch,headers={'Authorization':'Bearer '+(token or self.token)})
+
+    def test_upload_replay_and_processing_continue_after_removing_legacy_copies(self):
+        from alembic import command
+        from alembic.config import Config
+        from sqlalchemy import create_engine
+        url=URL.create('postgresql+psycopg',username=os.environ['PGUSER'],password=os.environ.get('PGPASSWORD',''),
+                       host=os.environ['PGHOST'],port=int(os.environ['PGPORT']),database=self.database)
+        engine=create_engine(url,hide_parameters=True)
+        config=Config(str(ROOT/'alembic.ini'))
+        original=self.batch()
+        receipt=self.post(original).json()
+        work_once(self.worker)
+        try:
+            with engine.begin() as db,patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url.render_as_string(hide_password=False)}):
+                config.attributes['connection']=db
+                command.stamp(config,'0010_alarm_warehouse')
+                command.upgrade(config,'head')
+            self.assertEqual(self.post(original).json(),receipt)
+            self.assertEqual(self.post(self.batch(wire(al_tag='TAG',al_active=False))).status_code,200)
+            work_once(self.worker)
+            self.assertEqual(self.post(self.batch(wire(table='eventhistory',ev_message='Original event'))).status_code,200)
+            work_once(self.worker)
+            self._run('SELECT warehouse.refresh_pending(1000)')
+            self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'3')
+            self.assertEqual(self.scalar('SELECT sum(saved_versions) FROM warehouse.fact_alarm_occurrence'),'2')
+            self.assertEqual(self.scalar('SELECT count(*) FROM warehouse.fact_event_occurrence'),'1')
+            self.assertEqual(self.scalar("SELECT to_regclass('platform.source_storage') IS NULL"),'t')
+        finally:
+            with engine.begin() as db,patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url.render_as_string(hide_password=False)}):
+                config.attributes['connection']=db
+                command.downgrade(config,'0010_alarm_warehouse')
+            self._run('BEGIN;'+(ROOT/'server/migrations/sql/0015_source_scoped_processing.sql').read_text(encoding='utf-8')+'COMMIT;')
+            engine.dispose()
 
     def scalar(self,query):
         return self._run(query).stdout.strip().splitlines()[-1]
@@ -174,25 +208,20 @@ class DeliveryIntegrationTests(PostgresCase):
         self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'1')
         self.assertEqual(self.scalar(f'SELECT count(*) FROM "{schema}".alarmhistory'),'1')
 
-    def test_identification_and_mapping_reprocess_share_lock_order_for_native_updates(self):
+    def test_identification_and_replay_share_lock_order_for_native_updates(self):
         import threading
         from concurrent.futures import ThreadPoolExecutor
         from sqlalchemy import event
         from server.worker.machine_ai import interpret_once
         self.assertEqual(self.post(self.batch(wire(al_tag='UNKNOWN',al_message='Conveyor VFD Connect Error'))).status_code,200)
         self.assertTrue(work_once(self.worker))
-        self._run(f"""INSERT INTO platform.mapping_versions(mapping_version_id,customer_id,site_id,project_id,source_id,version)
-            VALUES ('{uid(71)}','{uid(1)}','{uid(2)}','{uid(3)}','{uid(6)}',2);
-            INSERT INTO platform.mapping_rules(rule_id,customer_id,site_id,project_id,source_id,mapping_version_id,machine_id,record_type,tag)
-            VALUES ('{uid(72)}','{uid(1)}','{uid(2)}','{uid(3)}','{uid(6)}','{uid(71)}','{uid(4)}','alarm','UNKNOWN');
-            UPDATE platform.mapping_versions SET status='approved',approved_by='fixture',approved_at=now() WHERE mapping_version_id='{uid(71)}';
-            UPDATE platform.jobs SET status='pending',completed_at=NULL;""")
+        self._run("UPDATE platform.jobs SET status='pending',completed_at=NULL;")
         updated,ai_lock=threading.Event(),threading.Event()
         def before(_conn,_cursor,statement,params,_context,_many):
             if threading.current_thread().name.startswith('fixture-ai') and 'pg_advisory_xact_lock' in statement:
                 ai_lock.set()
         def after(_conn,_cursor,statement,params,_context,_many):
-            if statement.startswith('UPDATE platform.alarm_event_revisions SET mapping_status'):
+            if statement.startswith('INSERT INTO platform.alarm_event_revisions'):
                 updated.set();self.assertTrue(ai_lock.wait(3))
         def response(request):
             if request.url.path=='/api/tags':return httpx.Response(200,json={'models':[{'name':'qwen3:4b','digest':'fixture'}]})
@@ -210,7 +239,7 @@ class DeliveryIntegrationTests(PostgresCase):
             event.remove(self.worker,'after_cursor_execute',after)
         schema=self.native_schema()
         self.assertEqual(self.scalar(f'SELECT equipment FROM "{schema}".alarmhistory'),'Conveyor VFD')
-        self.assertEqual(self.scalar(f'SELECT mapping_status FROM "{schema}".alarmhistory'),'mapped')
+        self.assertEqual(self.scalar(f'SELECT mapping_status FROM "{schema}".alarmhistory'),'not_required')
 
     def test_acceptance_is_atomic_replay_is_stable_and_conflict_is_rejected(self):
         batch = self.batch()
@@ -272,7 +301,7 @@ class DeliveryIntegrationTests(PostgresCase):
         self.assertEqual(self.scalar("SELECT candidates->0->>'label' FROM platform.machine_interpretations"),'Oven 1')
         self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'1')
         self.assertEqual(self.scalar('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions'),before)
-        self.assertEqual(self.scalar('SELECT mapping_status FROM platform.alarm_event_revisions'),'quarantined')
+        self.assertEqual(self.scalar('SELECT mapping_status FROM platform.alarm_event_revisions'),'not_required')
         self.assertEqual(self.scalar("SELECT count(*) FROM platform.audit_log WHERE action='machine_interpreted'"),'1')
         with self.worker.begin() as db:
             self.assertEqual(db.execute(text('SELECT count(*) FROM platform.machine_interpretations')).scalar(),0)
@@ -339,12 +368,12 @@ class DeliveryIntegrationTests(PostgresCase):
         headers={'Authorization':'Bearer '+self.token}
         self.assertEqual(self.api.post('/v1/collector-check',json=dict(source_id=uid(6),generation_id=uid(7)),
                                        headers=headers).status_code,200)
-        # An empty scope is never a wildcard for an already approved machine.
-        self.assertEqual(self.post(self.batch(wire(al_tag='TAG'))).status_code,403)
+        # Machine-rule matches no longer gate an authenticated source upload.
+        self.assertEqual(self.post(self.batch(wire(al_tag='TAG'))).status_code,200)
         self.assertEqual(self.post(self.batch(wire(al_tag='UNKNOWN'))).status_code,200)
         self.assertEqual(self.post(self.batch(wire(table='eventhistory',ev_message='Oven 99',ev_source='LINE-01'))).status_code,200)
-        self.assertTrue(work_once(self.worker));self.assertTrue(work_once(self.worker))
-        self.assertEqual(self.scalar("SELECT count(*) FROM platform.alarm_event_revisions WHERE mapping_status='quarantined' AND machine_id IS NULL"),'2')
+        self.assertTrue(work_once(self.worker));self.assertTrue(work_once(self.worker));self.assertTrue(work_once(self.worker))
+        self.assertEqual(self.scalar("SELECT count(*) FROM platform.alarm_event_revisions WHERE mapping_status='not_required' AND machine_id IS NULL AND mapping_version_id IS NULL"),'3')
         client=Mock()
         self.assertTrue(interpret_once(self.worker,None,client,allow_alarms=False))
         client.stream.assert_not_called()
@@ -427,15 +456,15 @@ class DeliveryIntegrationTests(PostgresCase):
         work_once(self.worker)
         self.assertEqual(self.scalar('SELECT ordering_uncertain FROM platform.latest_alarm_state'),'t')
 
-    def test_unknown_mapping_quarantines_and_retry_processing_is_idempotent(self):
+    def test_unknown_tags_complete_without_mapping_and_retry_is_idempotent(self):
         self.post(self.batch(wire(al_tag='UNMAPPED')))
         work_once(self.worker)
-        self.assertEqual(self.scalar('SELECT processing_status FROM platform.upload_batches'),'quarantined')
+        self.assertEqual(self.scalar('SELECT processing_status FROM platform.upload_batches'),'completed')
         self._run("UPDATE platform.jobs SET status='pending',completed_at=NULL;")
         work_once(self.worker)
         self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'1')
 
-    def test_mapping_approval_and_reprocessing_recover_quarantined_payload(self):
+    def test_reprocessing_needs_no_mapping_and_approval_command_is_removed(self):
         from server.admin import main
         self.post(self.batch(wire(al_tag='NEW_TAG')))
         work_once(self.worker)
@@ -444,10 +473,11 @@ class DeliveryIntegrationTests(PostgresCase):
             return psycopg.connect(host=os.environ['PGHOST'],port=int(os.environ['PGPORT']),user=os.environ['PGUSER'],
                                   password=os.environ.get('PGPASSWORD',''),dbname=self.database,row_factory=dict_row)
         with patch('server.admin.connect',side_effect=admin),redirect_stdout(io.StringIO()):
-            self.assertEqual(main(['approve-mapping','--source-id',uid(6),'--machine-id',uid(4),'--alarm-tag','NEW_TAG','--reason','fixture engineer approval']),0)
-            self.assertEqual(main(['reprocess','--upload-id',upload_id,'--reason','approved mapping added']),0)
+            with self.assertRaises(SystemExit):
+                main(['approve-mapping'])
+            self.assertEqual(main(['reprocess','--upload-id',upload_id,'--reason','fixture replay verification']),0)
         work_once(self.worker)
-        self.assertEqual(self.scalar('SELECT mapping_status FROM platform.alarm_event_revisions'),'mapped')
+        self.assertEqual(self.scalar('SELECT mapping_status FROM platform.alarm_event_revisions'),'not_required')
         self.assertEqual(self.scalar('SELECT processing_status FROM platform.upload_batches'),'completed')
         self.assertEqual(self.scalar('SELECT count(*) FROM platform.alarm_event_revisions'),'1')
 
@@ -490,14 +520,12 @@ class DeliveryIntegrationTests(PostgresCase):
                                dict(payload=json.dumps(wire(al_message='Conveyor VFD Connect Error',al_tag_value='001.20')['original'])))
                     fingerprint=db.execute(text('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions')).scalar()
                     with patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url}): command.upgrade(config,'0008_source_tables')
-                    original_oid=db.execute(text("""SELECT '"SCADA_PC1"'::regnamespace::oid""")).scalar()
                     with patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url}): command.upgrade(config,'head')
-                    schema=db.execute(text('SELECT schema_name FROM platform.source_storage WHERE source_id=:source'),dict(source=uid(6))).scalar()
-                    self.assertEqual(schema,'Source')
-                    self.assertEqual(db.execute(text("SELECT '\"Source\"'::regnamespace::oid")).scalar(),original_oid)
-                    self.assertEqual(db.execute(text(f'SELECT al_tag_value FROM "{schema}".alarmhistory')).scalar(),'001.20')
+                    self.assertIsNone(db.execute(text("SELECT to_regclass('platform.source_storage')")).scalar())
+                    self.assertIsNone(db.execute(text("SELECT to_regnamespace('\"Source\"')")).scalar())
+                    self.assertEqual(db.execute(text("SELECT original_payload->>'al_tag_value' FROM platform.alarm_event_revisions")).scalar(),'001.20')
                     self.assertEqual(db.execute(text('SELECT md5(original_payload::text) FROM platform.alarm_event_revisions')).scalar(),fingerprint)
-                    self.assertEqual(db.execute(text('SELECT version_num FROM alembic_version')).scalar(),'0012_shared_source_storage')
+                    self.assertEqual(db.execute(text('SELECT version_num FROM alembic_version')).scalar(),'0016_equipment_overrides')
                     self.assertIsNotNone(db.execute(text("SELECT to_regprocedure('platform.authenticate_upload(bytea)')")).scalar())
                     self.assertEqual(db.execute(text("SELECT count(*) FROM pg_tables WHERE schemaname='platform'")).scalar(),19)
                     with patch.dict(os.environ,{'MIGRATION_DATABASE_URL':url}):

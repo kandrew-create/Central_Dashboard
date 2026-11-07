@@ -6,19 +6,16 @@ from sqlalchemy import text
 
 from collector.records import canonical_bytes
 from server.app.db import tenant_transaction
-from server.app.ingestion import matching_rules
 from shared.protocol import marker, validate_batch
 
 
-def normalized(scope, upload_id, generation, record, rules, allowed):
-    match = rules[0] if len(rules) == 1 and str(rules[0]['machine_id']) in allowed else None
+def normalized(scope, upload_id, generation, record):
     result = dict(revision_id=str(uuid4()), customer_id=scope['customer_id'], site_id=scope['site_id'], project_id=scope['project_id'],
                   source_id=scope['source_id'], generation_id=generation, upload_id=upload_id,
                   source_table=record['source_table'], record_type=record['record_type'], source_record_id=record['source_record_id'],
                   revision_key=record['revision_key'], content_hash=record['content_hash'], original_payload=canonical_bytes(record['original']).decode(),
                   source_timezone=record['source_timezone'] or '', ordering_uncertain=record['ordering_uncertain'],
-                  mapping_status='mapped' if match else 'quarantined', machine_id=match['machine_id'] if match else None,
-                  mapping_version_id=match['mapping_version_id'] if match else None, severity=match['severity'] if match else None)
+                  mapping_status='not_required', machine_id=None, mapping_version_id=None, severity=None)
     names = dict(start_time='al_start_time', norm_time='al_norm_time', ack_time='al_ack_time',
                  event_time='al_event_time' if record['record_type'] == 'alarm' else 'ev_time', last_update='last_update')
     for normalized_name, source in names.items():
@@ -95,10 +92,8 @@ def process_job(engine, job):
         batch = payload['batch']
         records = sorted(validate_batch(batch),key=lambda r:(r['source_table'],r['source_record_id'],r['revision_key']))
         scope = db.execute(text('SELECT customer_id,site_id,project_id,source_id FROM platform.sources WHERE source_id=:id'), {'id': job['source_id']}).mappings().one()
-        quarantined = 0
         for record in records:
-            rules = matching_rules(db, job['source_id'], record)
-            values = normalized(scope, job['upload_id'], job['generation_id'], record, rules, payload['allowed_machines'])
+            values = normalized(scope, job['upload_id'], job['generation_id'], record)
             # Serializes both revision identity and latest-state decisions across uploads.
             db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:identity,0))'),
                        {'identity': str(job['generation_id']) + ':' + record['source_table'] + ':' + str(record['source_record_id'])})
@@ -120,19 +115,13 @@ def process_job(engine, job):
             arguments = ','.join('CAST(:original_payload AS jsonb)' if k=='original_payload' else ':'+k for k in values)
             inserted = db.execute(text(f'INSERT INTO platform.alarm_event_revisions ({columns}) VALUES ({arguments}) ON CONFLICT DO NOTHING RETURNING revision_id'), values).first()
             if inserted is None:
-                existing = db.execute(text('''SELECT revision_id,mapping_status FROM platform.alarm_event_revisions WHERE generation_id=:generation_id
+                existing = db.execute(text('''SELECT revision_id FROM platform.alarm_event_revisions WHERE generation_id=:generation_id
                     AND source_table=:source_table AND source_record_id=:source_record_id AND content_hash=:content_hash'''), values).mappings().one()
                 values['revision_id'] = existing['revision_id']
-                if values['mapping_status'] == 'mapped' and existing['mapping_status'] == 'quarantined':
-                    db.execute(text('''UPDATE platform.alarm_event_revisions SET mapping_status=:mapping_status,mapping_version_id=:mapping_version_id,
-                        machine_id=:machine_id,severity=:severity WHERE revision_id=:revision_id'''), values)
-                elif existing['mapping_status'] == 'mapped':
-                    values['mapping_status'] = 'mapped'
             db.execute(text('''INSERT INTO platform.machine_interpretations
                 (revision_id,customer_id,source_id,generation_id,source_table,source_record_id)
                 VALUES (:revision_id,:customer_id,:source_id,:generation_id,:source_table,:source_record_id)
                 ON CONFLICT (revision_id) DO NOTHING'''), values)
-            quarantined += values['mapping_status'] == 'quarantined'
             update_latest(db, values, record)
         completed = db.execute(text('''UPDATE platform.jobs SET status='completed',completed_at=now(),lease_token=NULL,lease_expires_at=NULL,
             last_error_code=NULL WHERE job_id=:job AND lease_token=:token AND lease_expires_at>clock_timestamp() RETURNING job_id'''),
@@ -140,7 +129,7 @@ def process_job(engine, job):
         if completed is None:
             raise RuntimeError('lease_expired')
         db.execute(text('UPDATE platform.upload_batches SET processing_status=:status,processed_at=now() WHERE upload_id=:id'),
-                   dict(status='quarantined' if quarantined else 'completed', id=job['upload_id']))
+                   dict(status='completed', id=job['upload_id']))
         db.execute(text("INSERT INTO platform.audit_log(customer_id,actor,action,entity_type,entity_id) VALUES (:customer,'batch-worker','batch_processed','upload_batch',:id)"),
                    dict(customer=job['customer_id'], id=job['upload_id']))
     return True

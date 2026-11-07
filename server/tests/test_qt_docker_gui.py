@@ -18,6 +18,143 @@ except ImportError:
 
 @unittest.skipUnless(QApplication is not None, 'optional Qt Docker GUI dependency is not installed')
 class ModernDockerWindowTests(unittest.TestCase):
+    def test_ai_buttons_follow_saved_state_after_refresh_busy_work_and_model_edits(self):
+        self.app._show_ai_configuration(dict(enabled=True,model='saved-model'))
+        self.assertFalse(self.app.enable_ai_button.isEnabled())
+        self.assertTrue(self.app.disable_ai_button.isEnabled())
+        self.assertTrue(self.app.enable_ai_button.property('aiToggle'))
+        self.app.ai_model.setText('unsaved-other-model')
+        self.app._sync_controls()
+        self.assertFalse(self.app.enable_ai_button.isEnabled())
+        self.app.busy=True;self.app._sync_controls()
+        self.assertFalse(self.app.enable_ai_button.isEnabled())
+        self.assertFalse(self.app.disable_ai_button.isEnabled())
+        self.app.busy=False;self.app._sync_controls()
+        self.assertFalse(self.app.enable_ai_button.isEnabled())
+        self.assertTrue(self.app.disable_ai_button.isEnabled())
+        self.app._show_ai_configuration(dict(enabled=False,model='saved-model'))
+        self.assertTrue(self.app.enable_ai_button.isEnabled())
+        self.assertFalse(self.app.disable_ai_button.isEnabled())
+        self.assertEqual(self.app.ai_model.text(),'unsaved-other-model')
+        self.app.ai_model.setText('saved-model')
+
+    def test_successful_enable_disables_repeat_clicks_and_disable_reverses_buttons(self):
+        started,release=threading.Event(),threading.Event()
+        self.addCleanup(release.set)
+        def enable(model):
+            started.set();release.wait(3)
+            config=dict(enabled=True,model=model)
+            self.service.machine_interpretations.return_value=dict(configuration=config,rows=[],records_available=False)
+            return config
+        def disable():
+            config=dict(enabled=False,model=self.app._ai_saved_model)
+            self.service.machine_interpretations.return_value=dict(configuration=config,rows=[],records_available=False)
+            return config
+        self.service.enable_machine_ai.side_effect=enable
+        self.service.disable_machine_ai.side_effect=disable
+        self.app.enable_ai_button.click()
+        self.assertTrue(started.wait(1))
+        self.app.enable_ai_button.click()
+        release.set();self.wait_idle()
+        self.assertFalse(self.app.enable_ai_button.isEnabled())
+        self.assertTrue(self.app.disable_ai_button.isEnabled())
+        self.app.enable_ai_button.click();self.app.enable_machine_ai()
+        self.service.enable_machine_ai.assert_called_once()
+        self.app.disable_ai_button.click();self.wait_idle()
+        self.assertTrue(self.app.enable_ai_button.isEnabled())
+        self.assertFalse(self.app.disable_ai_button.isEnabled())
+        self.app.disable_machine_ai()
+        self.service.disable_machine_ai.assert_called_once()
+
+    def test_failed_enable_keeps_retry_available_and_does_not_change_saved_state(self):
+        self.service.enable_machine_ai.side_effect=CollectorError('Local model unavailable')
+        with patch('server.management.qt_docker_gui.QMessageBox.critical'):
+            self.app.enable_ai_button.click();self.wait_idle()
+        self.assertIs(self.app._ai_enabled,False)
+        self.assertTrue(self.app.enable_ai_button.isEnabled())
+        self.assertFalse(self.app.disable_ai_button.isEnabled())
+
+    def equipment_result(self,manual=None,version=0):
+        return dict(equipment_editing_available=True,summary=dict(occurrences=1,saved_versions=1,
+            uncertain_time=1,uncertain_order=1),issues=[dict(customer_id='00000000-0000-0000-0000-000000000001',
+            source_id='00000000-0000-0000-0000-000000000006',source_name='Fixture source',
+            condition_key='a'*64,tag='VFD',message='Conveyor VFD Connect Error',occurrences=1,
+            ai_suggestions='Conveyor VFD',equipment_name=manual or 'Conveyor VFD',
+            equipment_override=manual,override_version=version,equipment_origin='manual' if manual else 'ai')],daily=[])
+
+    def open_equipment_editor(self,result=None):
+        self.service.alarm_analysis.return_value=result or self.equipment_result()
+        self.app.navigate(4);self.wait_idle()
+        self.assertFalse(self.app.edit_equipment_button.isEnabled())
+        self.app.analysis_issues.selectRow(0)
+        self.assertTrue(self.app.edit_equipment_button.isEnabled())
+        self.app.edit_equipment_button.click()
+        self.application.processEvents()
+        return self.app._equipment_dialog
+
+    def test_equipment_edit_runs_off_gui_thread_and_preserves_original_ai_display(self):
+        threads=[]
+        def save(**args):
+            threads.append(threading.get_ident())
+            self.service.alarm_analysis.return_value=self.equipment_result('Correct drive',1)
+            return dict(equipment_label=args['equipment_label'],version=1)
+        self.service.save_equipment_override.side_effect=save
+        dialog=self.open_equipment_editor()
+        self.assertEqual(dialog.entry.text(),'Conveyor VFD')
+        dialog.entry.setText('Correct drive');dialog.accept();self.wait_idle()
+        self.assertIsNone(self.app._equipment_dialog)
+        self.assertNotEqual(threads[0],threading.get_ident())
+        self.service.save_equipment_override.assert_called_once_with(customer_id='00000000-0000-0000-0000-000000000001',
+            source_id='00000000-0000-0000-0000-000000000006',condition_key='a'*64,
+            equipment_label='Correct drive',expected_version=0)
+        self.assertEqual(self.app.analysis_issues.item(0,4).text(),'Correct drive')
+        self.assertEqual(self.app.analysis_issues.item(0,5).text(),'Conveyor VFD')
+        self.assertEqual(self.app.footer.text(),'Equipment override saved.')
+        self.service.enable_machine_ai.assert_not_called()
+
+    def test_failed_equipment_save_keeps_editor_input_and_blocks_parent_close(self):
+        self.service.save_equipment_override.side_effect=CollectorError('Refresh before saving this stale edit.')
+        dialog=self.open_equipment_editor()
+        dialog.entry.setText('Retain this input');dialog.accept();self.wait_idle()
+        self.assertTrue(dialog.isVisible())
+        self.assertTrue(dialog.entry.isEnabled())
+        self.assertEqual(dialog.entry.text(),'Retain this input')
+        self.assertIn('Refresh',dialog.error.text())
+        self.app.close();self.application.processEvents()
+        self.assertTrue(self.app.isVisible())
+        self.assertFalse(self.app.refresh_timer.isActive())
+        dialog.reject()
+
+    def test_clear_equipment_override_restores_saved_ai_without_a_model_call(self):
+        self.service.save_equipment_override.return_value=dict(equipment_label=None,version=2)
+        dialog=self.open_equipment_editor(self.equipment_result('User correction',1))
+        self.assertTrue(dialog.use_ai.isEnabled())
+        self.service.alarm_analysis.return_value=self.equipment_result(None,2)
+        dialog.use_ai.click();self.wait_idle()
+        self.assertIsNone(self.service.save_equipment_override.call_args.kwargs['equipment_label'])
+        self.assertEqual(self.service.save_equipment_override.call_args.kwargs['expected_version'],1)
+        self.assertEqual(self.app.analysis_issues.item(0,4).text(),'Conveyor VFD')
+        self.service.enable_machine_ai.assert_not_called()
+
+    def test_empty_equipment_name_does_not_issue_a_save(self):
+        dialog=self.open_equipment_editor()
+        dialog.entry.setText(' ');dialog.accept()
+        self.assertTrue(dialog.isVisible())
+        self.assertIn('equipment name',dialog.error.text())
+        self.service.save_equipment_override.assert_not_called()
+        dialog.reject()
+
+    def test_unknown_alarm_group_has_no_edit_button_action(self):
+        result=self.equipment_result()
+        result['issues'][0].update(tag=None,message=None)
+        self.app._show_analysis(result)
+        self.app.analysis_issues.selectRow(0)
+        self.assertFalse(self.app.edit_equipment_button.isEnabled())
+        result['issues'][0].update(tag='VFD',message='Unresolved original',equipment_editable=False)
+        self.app._show_analysis(result)
+        self.app.analysis_issues.selectRow(0)
+        self.assertFalse(self.app.edit_equipment_button.isEnabled())
+
     def test_minutes_display_preserves_all_existing_saved_second_intervals(self):
         for seconds in (0, *range(5, 3601)):
             self.app.refresh_interval.setValue(seconds / 60)
@@ -53,11 +190,14 @@ class ModernDockerWindowTests(unittest.TestCase):
                                    occurrences=1, confirmed_equipment='LINE-01', ai_suggestions='Conveyor VFD')],
                       daily=[dict(day='2026-10-20', occurrences=1)])
         self.service.alarm_analysis.side_effect = lambda **kwargs: threads.append(threading.get_ident()) or result
-        self.app.navigate(5)
+        self.app.navigate(4)
         self.wait_idle()
         self.assertNotEqual(threads[0], threading.get_ident())
-        self.assertEqual(self.app.analysis_issues.item(0, 4).text(), 'LINE-01')
+        self.assertEqual(self.app.analysis_issues.columnCount(),6)
+        self.assertEqual(self.app.analysis_issues.item(0, 4).text(), 'Conveyor VFD')
         self.assertEqual(self.app.analysis_issues.item(0, 5).text(), 'Conveyor VFD')
+        self.assertNotIn('mapping',self.app.analysis_summary.text().lower())
+        self.assertNotIn('mapping',self.app.analysis_note.text().lower())
         self.assertIn('2 alarm occurrences', self.app.analysis_summary.text())
         self.service.enable_machine_ai.assert_not_called()
         self.app.analysis_days.setCurrentIndex(2)
@@ -69,7 +209,7 @@ class ModernDockerWindowTests(unittest.TestCase):
         self.assertFalse(any('Copy URL' == item.text() for item in self.app.findChildren(QPushButton)))
 
     def test_background_analysis_failure_preserves_save_feedback_and_server_status(self):
-        self.app.navigate(5)
+        self.app.navigate(4)
         self.wait_idle()
         self.app.footer.setText('Server settings saved successfully.')
         self.service.alarm_analysis.side_effect = CollectorError('Analysis unavailable')
@@ -158,7 +298,7 @@ class ModernDockerWindowTests(unittest.TestCase):
     def test_model_refresh_retains_unsaved_entry_and_never_enables_ai(self):
         self.app._show_ai_configuration(dict(enabled=False, model='saved-model'))
         self.app.ai_model.setText('unsaved-model')
-        self.app._show_identification(dict(configuration=dict(enabled=False, model='saved-model'), rows=[], records_available=False))
+        self.app._show_ai_settings(dict(configuration=dict(enabled=False, model='saved-model'), rows=[], records_available=False))
         self.assertEqual(self.app.ai_model.text(), 'unsaved-model')
         self.service.enable_machine_ai.assert_not_called()
         self.app.ai_model.setText('saved-model')
@@ -202,6 +342,7 @@ class ModernDockerWindowTests(unittest.TestCase):
 
     def destroy(self):
         self.wait_idle()
+        if self.app._equipment_dialog is not None:self.app._equipment_dialog.reject()
         self.app.form_dirty = False
         self.app.close()
         self.app.deleteLater()
@@ -366,7 +507,7 @@ class ModernDockerWindowTests(unittest.TestCase):
         self.service.export.assert_not_called()
         self.assertEqual(Path(path).read_bytes(), b'existing encrypted fixture')
 
-    def test_identification_tab_defers_reads_during_work_and_preserves_feedback(self):
+    def test_analysis_defers_ai_settings_and_report_reads_during_work_and_preserves_feedback(self):
         started, release = threading.Event(), threading.Event()
         self.addCleanup(release.set)
         self.service.machine_interpretations.reset_mock()
@@ -384,14 +525,31 @@ class ModernDockerWindowTests(unittest.TestCase):
         self.service.machine_interpretations.assert_called_once()
         self.assertEqual(self.app.footer.text(), 'Operation completed.')
 
-    def test_identification_preserves_original_message_and_never_enables_ai(self):
-        result = dict(records_available=True, rows=[dict(source_name='Fixture SCADA', source_table='alarmhistory',
-                      source_record_id=1, status='suggested', candidates=[dict(label='Conveyor VFD')], model='fixture-local',
-                      policy_version='fixture', original_message='Conveyor VFD <Connect Error>')])
-        self.app._show_identification(result)
-        self.app.ai_table.selectRow(0)
-        self.assertEqual(self.app.ai_evidence.toPlainText(), 'Conveyor VFD <Connect Error>')
-        self.assertNotIn('enable_machine_ai', [call[0] for call in self.service.method_calls])
+    def test_equipment_editor_preserves_original_message_as_plain_text(self):
+        from PySide6.QtWidgets import QTextEdit
+        result=self.equipment_result()
+        result['issues'][0]['message']='Conveyor VFD <Connect Error>'
+        dialog=self.open_equipment_editor(result)
+        evidence=dialog.findChildren(QTextEdit)[0]
+        self.assertTrue(evidence.isReadOnly())
+        self.assertEqual(evidence.toPlainText(),'Conveyor VFD <Connect Error>')
+        self.service.enable_machine_ai.assert_not_called()
+        dialog.reject()
+
+    def test_identification_page_removed_and_ai_controls_live_in_analysis(self):
+        from server.management.qt_docker_gui import PAGES
+        self.assertEqual(self.app.pages.count(),5)
+        self.assertEqual([page[0] for page in PAGES],['Overview','Register source','Sources & setup','Deployment','Alarm analysis'])
+        self.assertFalse(hasattr(self.app,'ai_table'))
+        self.app.navigate(4);self.wait_idle()
+        self.assertFalse(self.app.ai_settings_panel.isVisible())
+        self.app.ai_settings_panel.show()
+        self.assertTrue(self.app.ai_model.isVisible())
+        self.assertTrue(self.app.enable_ai_button.isVisible())
+        self.assertTrue(self.app.disable_ai_button.isVisible())
+        for call in self.service.machine_interpretations.call_args_list:
+            self.assertEqual(call.kwargs,dict(include_records=False))
+        self.service.enable_machine_ai.assert_not_called()
 
     def test_footer_and_navigation_remain_available_at_minimum_window_size(self):
         self.app.resize(1100, 740)

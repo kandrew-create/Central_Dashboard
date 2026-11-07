@@ -1,33 +1,39 @@
-# Shared warehouse and legacy source tables
+# Shared warehouse storage
 
-Current Central storage uses three fixed schemas:
+Current Central storage uses fixed schemas shared by every registered source:
 
-| Schema | Objects and responsibility |
+| Schema | Responsibility |
 | --- | --- |
-| `platform` | Authoritative registrations, generations, upload receipts, original alarm/event revisions, mappings, jobs and audit history. |
-| `warehouse` | Stored `fact_alarm_occurrence` and `fact_event_occurrence`, shared live dimension views and durable refresh queues. |
-| `reporting` | Maintained `alarm_hourly_summary`, `alarm_daily_summary`, `equipment_alarm_summary`, `source_upload_summary` and a dirty-day queue. |
+| `platform` | Authoritative registrations, generations, committed receipts, original revisions, historical mapping metadata, jobs and audit history. |
+| `warehouse` | Stored alarm/event occurrence facts, UUID dimension views and durable refresh queues. |
+| `reporting` | Maintained hourly, daily, equipment and source-upload summaries, a dirty-day queue and named read-only occurrence views. |
 
-Migration `0011_stored_warehouse` backfills facts and summaries without rewriting original records. Migration `0012_shared_source_storage` stops creating physical schemas/tables for new source registrations. Source and generation UUIDs keep independent SCADA databases and reused native IDs separate. Alarm/event table identity is preserved, so an alarm ID and event ID with the same integer remain different occurrences. Facts contain one row per source/generation/native ID **within their record type**; changed copies increase saved-version counts rather than occurrence counts.
+```text
+Central PostgreSQL
+|-- platform: source identities, originals, receipts and processing
+|-- warehouse
+|   |-- fact_alarm_occurrence
+|   |-- fact_event_occurrence
+|   `-- dim_customer / dim_site / dim_project / dim_source / dim_machine / dim_date
+`-- reporting: hourly / daily / equipment / source-upload summaries
+```
 
-The UUID dimension views refer to existing registration tables, so labels stay current without duplicated dimensions or changed identities. This is a shared star model with stored facts; historical dimension-label versioning is not implemented. Source-specific views are not automatically created for each new source. Existing physical source tables remain synchronized as a compatibility layer, with their OIDs, grants and history intact. They still consume additional storage; this upgrade does not silently drop them or convert them to views.
+Rows retain `customer_id`, `source_id` and `generation_id`; each source is a separately registered SCADA database. One collector PC can host multiple sources. UUIDs distinguish reused native IDs; alarm and event identities remain separate. Facts count one occurrence per source/generation/native ID within each record type. Changed copies increase saved-version counts. Original fields, source-local timestamps, separate milliseconds and revision history remain in `platform.alarm_event_revisions`.
 
-All new stored tables enforce forced customer RLS. The private NOLOGIN, NOBYPASSRLS `scada_warehouse_owner` has explicit maintenance policies and narrowly exposed refresh entry points; runtime accounts must never inherit it. Reporting readers receive safe derived columns and cannot read original payload/operator fields or mutate data. See [refresh, summaries and security](central-server-analysis.md#stored-warehouse-architecture).
+Dimension views use existing registration tables, so current labels stay consistent without duplicated dimensions. Historical dimension-label versioning is not implemented. AI suggestions and registered event identity remain separate from inactive historical mapping annotations. Migration 0015 removes machine-mapping approval and releases completed mapping holds; see [source-scoped processing](source-scoped-processing.md). See [refresh and security](central-server-analysis.md#stored-warehouse-architecture).
 
-## Legacy source-specific layout
+## Removing the old per-source design
 
-Central Server 0.6.1 names each source schema from the **SCADA PC/source name entered at registration**. For example, a source registered as `Oven Line SCADA` has `"Oven Line SCADA".alarmhistory` and `"Oven Line SCADA".eventhistory`. The source details in the manager show its SQL schema. Each schema contains exactly these two physical tables. Deleting a registration preserves its schema and history.
+Published Central Server 0.6.1 created a schema named for each source, with physical `alarmhistory` and `eventhistory` copies. Migration `0012_shared_source_storage` stopped creating these for new registrations. **`0013_remove_source_copies`** verifies and removes the remaining copies, their metadata and synchronization functions/triggers. Source renames now change registration labels without schema DDL.
 
-Migration `0009_source_schema_names` renames existing source schemas in place, preserving table OIDs, permissions, data and revision identity. New registrations use their source label immediately; a later administrative source-name update renames the schema in the same transaction. Registered labels remain unchanged. PostgreSQL identifiers are limited to 63 UTF-8 bytes: longer labels are shortened at character boundaries. Commas become underscores for pgAdmin's comma-separated restriction; control characters are replaced and surrounding whitespace trimmed. Reserved `pg_` names get a `SCADA_` prefix. A collision with another source or an existing schema adds the source UUID as a suffix, shortening the label as needed. Sources with the same name remain separate even across customers. Dynamic identifiers are always quoted.
+Apply migrations only to Central storage, with the configured API/worker/manager stopped and an encrypted, restore-verified backup available. Migration 0013 locks the relevant tables, verifies both legacy tables against canonical evidence (native values, metadata and retained identification candidates), and removes them in one transaction. Missing/different rows, unexpected columns, unrecognized ownership, extra schema objects or external dependencies block removal. No cascading deletion is used. Investigate failures; do not drop data to bypass validation.
 
-Migration `0008_source_tables` applies only to Central storage. It backfills existing saved revisions and equipment identifications, then synchronizes new revisions and identification updates transactionally. The earlier migration assigned numbered schemas to active sources first; migration `0009` replaces those names with registered labels. Previously deleted registrations without history need no schema; historical records and future accepted backlog remain supported.
+Originals, identity, credentials, receipts, mappings, jobs, audit history, facts and summaries remain intact. Existing `logs` compatibility views contain no duplicate physical storage and remain available to authorized readers. The cluster-wide NOLOGIN `scada_storage_owner` role remains for other databases/historical downgrades, with its former privileges revoked in this database; runtime identities must never inherit it or the private warehouse owner.
 
-Native columns retain uploaded values, source-local timestamps and separate milliseconds. Additional columns retain customer/source/generation/revision identity, content hash, receipt time, timezone/ordering uncertainty, mapping status and equipment identification. Alarm equipment remains a suggestion; events use the registered machine tag. These results do not approve reporting mappings or clear quarantine.
+Downgrading 0013 rebuilds copies from retained originals. It needs additional storage and assigns **new OIDs**; it cannot restore custom grants or external dependencies. Restore the pre-upgrade backup for exact old objects/permissions. Earlier migrations remain unchanged. Published installers and separate Central Server installations are not updated by this local deployment.
 
-One row represents one saved content version. Replayed unchanged content does not create another row. Changed content retains another revision, so the native `id` alone is not a unique central identifier; use `revision_id` and source/generation identity.
+## Browsing safely
 
-The original ledger, receipts, credentials, jobs and audit history remain in `platform`. Source tables are an additional stored representation and consume additional space. Transactional triggers synchronize them: a failed write rolls back processing and leaves the accepted upload available for retry. Direct row edits are blocked; use the collector/application workflow. Internal database objects are preserved.
+Browse shared facts and summaries in [pgAdmin](pgadmin-browsing.md). Migration `0014_named_warehouse_views` adds read-only `reporting.alarm_occurrences` and `reporting.event_occurrences` with customer/site/project/source names for direct filtering. These are invoker views over shared facts/dimensions, with no copied rows or new tenant privileges. Join `warehouse.dim_source` on both `customer_id` and `source_id` to display source names. Another source for the authorized customer needs no new SQL schema or navigation filter.
 
-Tables enforce customer row policies, fixed source/customer constraints and a foreign key to the canonical revision. A private non-login storage owner performs synchronization; runtime identities must not inherit that role. No extra raw-data access is granted to reporting readers. A pgAdmin schema restriction simplifies navigation but is not access control.
-
-See [pgAdmin browsing](pgadmin-browsing.md). Never apply this migration to a SCADA source database.
+Stored warehouse/reporting tables enforce forced customer RLS. An arbitrary-SQL reader needs fixed customer authorization in database policies, not merely a changeable `app.customer_id` setting. Schema restrictions simplify navigation; they do not provide isolation or grant access.

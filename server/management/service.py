@@ -52,6 +52,12 @@ def text(value,label):
 
 class ManagerService:
     @operation
+    def save_equipment_override(self,customer_id,source_id,condition_key,equipment_label,expected_version):
+        from server.management.equipment import save_override
+        with self.connection() as db:
+            return save_override(db,customer_id,source_id,condition_key,equipment_label,expected_version)
+
+    @operation
     def alarm_analysis(self, days=30, source_id=None, customer_id=None):
         from server.management.alarm_analysis import report
         with self.connection() as db:
@@ -160,14 +166,13 @@ class ManagerService:
     def sources(self):
         with self.connection() as db:
             return db.execute('''SELECT s.*,c.name customer_name,si.name site_name,p.name project_name,g.generation_id,
-                g.generation_number,storage.schema_name storage_schema,
+                g.generation_number,NULL::text storage_schema,
                 (SELECT max(received_at) FROM platform.upload_batches b WHERE b.source_id=s.source_id) last_received,
                 (SELECT count(*) FROM platform.upload_batches b WHERE b.source_id=s.source_id AND b.processing_status='quarantined') quarantined_batches,
                 (SELECT count(*) FROM platform.upload_batches b WHERE b.source_id=s.source_id AND b.processing_status='failed') failed_batches
                 FROM platform.sources s JOIN platform.customers c USING(customer_id)
                 JOIN platform.sites si ON si.site_id=s.site_id JOIN platform.projects p ON p.project_id=s.project_id
                 LEFT JOIN platform.source_generations g ON g.source_id=s.source_id AND g.retired_at IS NULL
-                LEFT JOIN platform.source_storage storage ON storage.source_id=s.source_id
                 WHERE s.deleted_at IS NULL
                 ORDER BY s.name,s.source_id LIMIT 1000''').fetchall()
 
@@ -256,7 +261,7 @@ class ManagerService:
                     db.execute('INSERT INTO platform.machines VALUES (%(machine_id)s,%(customer_id)s,%(site_id)s,%(project_id)s,%(machine_tag)s,%(name)s)',machine)
                 # Source-only registration grants no machine scope. Keep explicit
                 # administrative provisioning compatible without inventing a tag.
-                ids=dict(**scope,source_id=uuid4(),collector_id=uuid4(),generation_id=uuid4(),credential_id=uuid4(),mapping_version_id=uuid4())
+                ids=dict(**scope,source_id=uuid4(),collector_id=uuid4(),generation_id=uuid4(),credential_id=uuid4())
                 if machine is not None:ids['machine_id']=machine['machine_id']
                 token=secrets.token_urlsafe(32)
                 values=dict(ids,name=source_name,verifier=hashlib.sha256(token.encode()).digest())
@@ -266,7 +271,6 @@ class ManagerService:
                 db.execute('INSERT INTO platform.collector_credentials(credential_id,customer_id,site_id,project_id,source_id,verifier) VALUES (%(credential_id)s,%(customer_id)s,%(site_id)s,%(project_id)s,%(source_id)s,%(verifier)s)',values)
                 if machine is not None:
                     db.execute('INSERT INTO platform.credential_machines VALUES (%(customer_id)s,%(site_id)s,%(project_id)s,%(source_id)s,%(credential_id)s,%(machine_id)s)',values)
-                db.execute('INSERT INTO platform.mapping_versions(mapping_version_id,customer_id,site_id,project_id,source_id,version) VALUES (%(mapping_version_id)s,%(customer_id)s,%(site_id)s,%(project_id)s,%(source_id)s,1)',values)
                 db.execute("INSERT INTO platform.audit_log(customer_id,actor,action,entity_type,entity_id) VALUES (%(customer_id)s,current_user,'source_registered','source',%(source_id)s)",values)
                 setup={k:str(v) for k,v in ids.items()}
                 setup.update(source_name=source_name,upload_token=token)

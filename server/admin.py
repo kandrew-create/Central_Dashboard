@@ -36,10 +36,9 @@ def private_output(path, document):
             os.close(descriptor)
 
 
-def provision(db, customer_name, site_name, project_name, machine_tag, alarm_tag, event_source):
-    ids = {key: str(uuid4()) for key in ('customer_id','site_id','project_id','machine_id','collector_id','source_id','generation_id','credential_id','mapping_version_id')}
-    ids.update(customer_name=customer_name, site_name=site_name, project_name=project_name, machine_tag=machine_tag,
-               alarm_tag=alarm_tag, event_source=event_source)
+def provision(db, customer_name, site_name, project_name, machine_tag):
+    ids = {key: str(uuid4()) for key in ('customer_id','site_id','project_id','machine_id','collector_id','source_id','generation_id','credential_id')}
+    ids.update(customer_name=customer_name, site_name=site_name, project_name=project_name, machine_tag=machine_tag)
     db.execute("SELECT set_config('app.customer_id',%s,true)", (ids['customer_id'],))
     statements = [
         'INSERT INTO platform.customers(customer_id,name) VALUES (%(customer_id)s,%(customer_name)s)',
@@ -51,17 +50,11 @@ def provision(db, customer_name, site_name, project_name, machine_tag, alarm_tag
         "INSERT INTO platform.source_generations VALUES (%(generation_id)s,%(customer_id)s,%(source_id)s,1,'commissioned locally',current_user,'initial provisioning',now(),NULL)",
         'INSERT INTO platform.collector_credentials(credential_id,customer_id,site_id,project_id,source_id,verifier) VALUES (%(credential_id)s,%(customer_id)s,%(site_id)s,%(project_id)s,%(source_id)s,%(verifier)s)',
         'INSERT INTO platform.credential_machines VALUES (%(customer_id)s,%(site_id)s,%(project_id)s,%(source_id)s,%(credential_id)s,%(machine_id)s)',
-        'INSERT INTO platform.mapping_versions(mapping_version_id,customer_id,site_id,project_id,source_id,version) VALUES (%(mapping_version_id)s,%(customer_id)s,%(site_id)s,%(project_id)s,%(source_id)s,1)'
     ]
     token = secrets.token_urlsafe(32)
     parameters = dict(ids, verifier=hashlib.sha256(token.encode()).digest())
     for statement in statements:
         db.execute(statement, parameters)
-    for kind, field, value in (('alarm','tag',alarm_tag), ('event','event_source',event_source)):
-        if value:
-            query = sql.SQL('INSERT INTO platform.mapping_rules(rule_id,customer_id,site_id,project_id,source_id,mapping_version_id,machine_id,record_type,{}) VALUES (%(rule)s,%(customer_id)s,%(site_id)s,%(project_id)s,%(source_id)s,%(mapping_version_id)s,%(machine_id)s,%(kind)s,%(value)s)').format(sql.Identifier(field))
-            db.execute(query, dict(parameters, rule=str(uuid4()), kind=kind, value=value))
-    db.execute("UPDATE platform.mapping_versions SET status='approved',approved_by=current_user,approved_at=now() WHERE mapping_version_id=%(mapping_version_id)s", parameters)
     db.execute("INSERT INTO platform.audit_log(customer_id,actor,action,entity_type,entity_id) VALUES (%(customer_id)s,current_user,'source_provisioned','source',%(source_id)s)", parameters)
     return {key: value for key, value in ids.items() if key.endswith('_id')} | {'upload_token': token}
 
@@ -72,8 +65,6 @@ def main(argv=None):
     provision_args = commands.add_parser('provision')
     for name in ('customer', 'site', 'project', 'machine-tag'):
         provision_args.add_argument('--'+name, required=True)
-    provision_args.add_argument('--alarm-tag')
-    provision_args.add_argument('--event-source')
     provision_args.add_argument('--output', type=Path, required=True, help='New private credential handoff file; never commit it')
     commands.add_parser('runtime-logins', help='Create separate restricted API/worker logins using prompted or environment passwords')
     retry = commands.add_parser('reprocess')
@@ -86,12 +77,6 @@ def main(argv=None):
     generation = commands.add_parser('new-generation')
     generation.add_argument('--source-id', type=UUID, required=True)
     generation.add_argument('--authorization', required=True)
-    mapping = commands.add_parser('approve-mapping', help='Approve a new exact-match mapping version')
-    mapping.add_argument('--source-id', type=UUID, required=True)
-    mapping.add_argument('--machine-id', type=UUID, required=True)
-    mapping.add_argument('--alarm-tag')
-    mapping.add_argument('--event-source')
-    mapping.add_argument('--reason', required=True)
     inspect = commands.add_parser('status', help='Show processing and quarantine counts without raw records')
     inspect.add_argument('--source-id', type=UUID, required=True)
     args = parser.parse_args(argv)
@@ -110,7 +95,7 @@ def main(argv=None):
                         db.execute(sql.SQL('ALTER ROLE {} PASSWORD {}').format(sql.Identifier(login),sql.Literal(password)))
                     db.execute(sql.SQL('GRANT {} TO {}').format(sql.Identifier(capability),sql.Identifier(login)))
             elif args.command == 'provision':
-                handoff = provision(db,args.customer,args.site,args.project,args.machine_tag,args.alarm_tag,args.event_source)
+                handoff = provision(db,args.customer,args.site,args.project,args.machine_tag)
                 private_output(args.output, handoff)
             elif args.command == 'rotate-credential':
                 source = db.execute('SELECT * FROM platform.sources WHERE source_id=%s AND deleted_at IS NULL FOR UPDATE', (args.source_id,)).fetchone()
@@ -135,29 +120,6 @@ def main(argv=None):
                 db.execute('INSERT INTO platform.source_generations VALUES (%s,%s,%s,%s,%s,current_user,%s,now(),NULL)',
                            (generation_id,source['customer_id'],args.source_id,number,'locally authorized reset',args.authorization))
                 print(json.dumps({'generation_id':str(generation_id)}))
-            elif args.command == 'approve-mapping':
-                source=db.execute('SELECT * FROM platform.sources WHERE source_id=%s FOR UPDATE',(args.source_id,)).fetchone()
-                machine=db.execute('SELECT * FROM platform.machines WHERE machine_id=%s',(args.machine_id,)).fetchone()
-                if not source or not machine or any(source[k]!=machine[k] for k in ('customer_id','site_id','project_id')) or not args.reason.strip() or not (args.alarm_tag or args.event_source):
-                    raise ValueError('Provide a same-project machine, exact source tag and approval reason.')
-                prior=db.execute("SELECT * FROM platform.mapping_versions WHERE source_id=%s AND status='approved' ORDER BY version DESC LIMIT 1",(args.source_id,)).fetchone()
-                version=db.execute('SELECT coalesce(max(version),0)+1 AS n FROM platform.mapping_versions WHERE source_id=%s',(args.source_id,)).fetchone()['n']
-                mapping_id=uuid4()
-                db.execute('INSERT INTO platform.mapping_versions(mapping_version_id,customer_id,site_id,project_id,source_id,version) VALUES (%s,%s,%s,%s,%s,%s)',
-                    (mapping_id,source['customer_id'],source['site_id'],source['project_id'],args.source_id,version))
-                if prior:
-                    db.execute('''INSERT INTO platform.mapping_rules SELECT gen_random_uuid(),customer_id,site_id,project_id,source_id,%s,machine_id,
-                        record_type,tag,station,selection,group_code,event_source,severity FROM platform.mapping_rules
-                        WHERE mapping_version_id=%s AND NOT ((%s::text IS NOT NULL AND record_type='alarm' AND tag IS NOT DISTINCT FROM %s) OR (%s::text IS NOT NULL AND record_type='event' AND event_source IS NOT DISTINCT FROM %s))''',
-                        (mapping_id,prior['mapping_version_id'],args.alarm_tag,args.alarm_tag,args.event_source,args.event_source))
-                for kind,tag,event_source in (('alarm',args.alarm_tag,None),('event',None,args.event_source)):
-                    if tag or event_source:
-                        db.execute('''INSERT INTO platform.mapping_rules(rule_id,customer_id,site_id,project_id,source_id,mapping_version_id,machine_id,record_type,tag,event_source)
-                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
-                            (uuid4(),source['customer_id'],source['site_id'],source['project_id'],args.source_id,mapping_id,args.machine_id,kind,tag,event_source))
-                db.execute("UPDATE platform.mapping_versions SET status='approved',approved_by=current_user,approved_at=now() WHERE mapping_version_id=%s",(mapping_id,))
-                db.execute("INSERT INTO platform.audit_log(customer_id,actor,action,entity_type,entity_id,details) VALUES (%s,current_user,'mapping_approved','mapping_version',%s,jsonb_build_object('reason',%s::text))",
-                           (source['customer_id'],mapping_id,args.reason))
             elif args.command == 'status':
                 rows=db.execute('SELECT upload_id,batch_id,record_count,processing_status,received_at FROM platform.upload_batches WHERE source_id=%s ORDER BY received_at DESC LIMIT 100',(args.source_id,)).fetchall()
                 print(json.dumps({'batches':rows},default=str))

@@ -2,7 +2,7 @@
 
 Published revision: **X3** — Central Server **0.6.1** and SCADA Collector **0.4.0**. This revision adds local alarm equipment identification, registered event tags and two native tables per registered source. See [X3 release notes and verification](docs/release-X3.md).
 
-The local 0.6.2 update automatically loads saved AI settings and interpretations when opening the manager or its **Equipment Identification** tab (called **Local AI** in earlier builds). AI runs on the central PC and can identify uploaded records from multiple collector PCs. It preserves the enabled/disabled choice. See [AI display fix](docs/ai-display-refresh.md); published X3 downloads remain 0.6.1.
+The local WSL/Docker manager combines equipment review, saved AI suggestions, manual corrections and AI settings in **Alarm analysis**; the separate Equipment Identification tab is removed. Native Windows builds retain their earlier AI view. AI runs on the central PC and can identify uploaded records from multiple collector PCs. It preserves the enabled/disabled choice. See [AI display fix](docs/ai-display-refresh.md); published X3 downloads remain 0.6.1.
 
 The separate local Collector **0.4.1** build adds a Collector-only Docker package, automatic startup of commissioned setups, a hidden upload URL and schedule-specific controls. Install it on the designated Collector PC using the [safe installation guide](docs/collector-installation.md). Collector applications and images were removed from this Central development PC on 6 November 2026; installation artifacts and protected recovery material are retained. Published X3 downloads remain unchanged.
 
@@ -23,9 +23,9 @@ The X2 Central Server supports PostgreSQL 17 and 18, detects installed binaries 
 
 Pending automation work is tracked in the [CI/CD pipeline punchlist](docs/ci-cd-punchlist.md).
 
-The updated WSL/Docker manager adds [alarm analysis and warehouse views](docs/central-server-analysis.md), minute-based refresh controls and automatic Docker/server startup. It keeps approved mappings separate from saved AI equipment suggestions; diagnostic AI remains future work.
+The updated WSL/Docker manager adds [alarm analysis and warehouse views](docs/central-server-analysis.md), minute-based refresh controls and automatic Docker/server startup. Uploads now process without machine-mapping approval; saved AI equipment suggestions remain optional and diagnostic AI remains future work. See [source-scoped processing](docs/source-scoped-processing.md).
 
-The current warehouse update adds stored alarm/event occurrence facts and precomputed summaries in fixed `platform`, `warehouse` and `reporting` schemas. New SCADA sources share these tables; existing source-specific tables and their identities remain compatible. Refresh runs independently of ingestion, with pending-update feedback in Alarm analysis. See [warehouse architecture and operation](docs/central-server-analysis.md#stored-warehouse-architecture).
+The current warehouse update adds stored alarm/event occurrence facts and precomputed summaries in fixed `platform`, `warehouse` and `reporting` schemas. Migration `0013_remove_source_copies` verifies and removes legacy duplicate tables while preserving originals, identities and receipts. All sources share these tables. See [upgrade safeguards](docs/source-table-layout.md). Refresh runs independently of ingestion, with pending-update feedback in Alarm analysis. See [warehouse architecture and operation](docs/central-server-analysis.md#stored-warehouse-architecture). Named read-only reporting views add project/source labels for direct filtering; see [pgAdmin queries](docs/pgadmin-browsing.md). Alarm analysis now shows saved AI evidence with uncertain source times and supports [audited equipment label edits](docs/equipment-suggestions.md).
 
 For development on Windows with WSL 2 and Docker Desktop, a native Linux management window now provides server controls, source registration and encrypted collector setup export. See [WSL / Docker setup and usage](docs/wsl-deployment.md). This deployment remains separate from the Windows installation.
 

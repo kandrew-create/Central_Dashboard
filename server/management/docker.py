@@ -350,6 +350,10 @@ class DockerManagerService:
     def alarm_analysis(self, days=30, source_id=None, customer_id=None):
         return self._rpc('alarm_analysis', dict(days=days, source_id=source_id, customer_id=customer_id))
 
+    def save_equipment_override(self,customer_id,source_id,condition_key,equipment_label,expected_version):
+        return self._rpc('save_equipment_override',dict(customer_id=customer_id,source_id=source_id,
+            condition_key=condition_key,equipment_label=equipment_label,expected_version=expected_version))
+
     def register(self, **arguments):
         return self._rpc('register', arguments)
 

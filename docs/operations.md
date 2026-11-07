@@ -2,9 +2,9 @@
 
 ## Stored warehouse operation
 
-Current Central storage separates original operational history (`platform`), stored occurrence facts and live UUID dimensions (`warehouse`), and maintained summaries (`reporting`). See [warehouse architecture](central-server-analysis.md#stored-warehouse-architecture) and [source storage compatibility](source-table-layout.md). Apply migrations `0011_stored_warehouse` and `0012_shared_source_storage` only to the separate Central database, with its configured services stopped and a verified private backup. Existing source tables/OIDs remain in place; new sources do not create physical schemas.
+Current Central storage separates original operational history (`platform`), stored occurrence facts and live UUID dimensions (`warehouse`), and maintained summaries (`reporting`). See [warehouse architecture](central-server-analysis.md#stored-warehouse-architecture) and [source storage compatibility](source-table-layout.md). Apply Alembic through `0015_source_scoped_processing` only to the separate Central database with matching application code, configured writers stopped and a verified private backup. Legacy copies were removed by 0013; 0014 provides named reporting views and 0015 removes machine-mapping approval. See [current processing policy](source-scoped-processing.md).
 
-The normal worker now also runs bounded warehouse maintenance independently of batch processing and Local AI. Committed revisions, approved-mapping reprocessing, latest-state changes and saved equipment identifications queue their occurrence identity. Reporting updates are transactional with their derived fact changes, with explicit freshness timestamps. A backlog means stored reporting can lag the authoritative original history; it does not mean the original batch was not accepted. Alarm analysis displays queued records/summaries and retrying updates. Original receipts, generations, source identities, pending Collector batches and mapping approval remain unchanged.
+The normal worker now also runs bounded warehouse maintenance independently of batch processing and Local AI. Committed revisions, audited processing retries, latest-state changes and saved equipment identifications queue their occurrence identity. Reporting updates are transactional with their derived fact changes, with explicit freshness timestamps. A backlog means stored reporting can lag the authoritative original history; it does not mean the original batch was not accepted. Alarm analysis displays queued records/summaries and retrying updates. Original receipts, generations, source identities and pending Collector batches remain unchanged; machine-mapping approval is retired.
 
 On an authorized Central administration connection, inspect derived state without modifying source data:
 
@@ -59,29 +59,28 @@ Compose performs migrations and provisions separate restricted runtime logins be
 
 The migration administrator and the NOLOGIN `scada_bootstrap_owner` must never be application logins. Bootstrap ownership has narrowly granted credential/source SELECT and job SELECT/UPDATE rights plus two fixed SECURITY DEFINER functions. API authentication resolves credential scope through one function; worker claiming uses the other. RLS remains forced on application tables and tenant context is transaction-local. Changing schema/role definitions requires migration review.
 
-On an authorized central administration connection, provision a registry, source/generation, initial machine, credential and exact-match mappings:
+On an authorized central administration connection, provision a registry, source/generation, explicit existing-style event machine identity and credential:
 
 ```sh
 python -m server.admin provision --customer "Customer" --site "Site" \
   --project "Project" --machine-tag "SITE-LINE01" \
-  --alarm-tag "APPROVED_SOURCE_TAG" --event-source "APPROVED_EVENT_SOURCE" \
   --output /secure/handoff/source.json
 ```
 
 `MIGRATION_DATABASE_URL` must point to the central database. For a container command, mount a private handoff directory writable by UID 10001. The output is created exclusively with private permissions, contains the one-time upload token and must be transferred through an approved secure path. Enter the IDs in local collector settings and store the token via the GUI/hidden CLI prompt. Credential verifiers alone are retained centrally. Do not paste tokens into commands, source control or logs.
 
-`rotate-credential --source-id UUID --output NEW_PRIVATE_FILE` provisions a replacement; optional `--revoke-prior` explicitly disables old tokens. Update the local protected token through authorized maintenance. Provision machine scope and approved mappings before customer reporting; no severity/code meanings are guessed.
+`rotate-credential --source-id UUID --output NEW_PRIVATE_FILE` provisions a replacement; optional `--revoke-prior` explicitly disables old tokens. Update the local protected token through authorized maintenance. Machine mappings are not required for processing or reporting; no severity/code meanings are guessed.
 
-## Quarantine and reprocessing
+## Processing retries
+
+Machine-mapping approval is removed. Migration 0015 labels new/unmapped revisions `not_required` and releases old mapping holds only where the processing job completed. Failed, pending and leased jobs retain their real state. The approval command is no longer available. Original mapping metadata remains inactive history; do not edit or delete it to repair uploads.
 
 ```sh
 python -m server.admin status --source-id SOURCE_UUID
-python -m server.admin approve-mapping --source-id SOURCE_UUID \
-  --machine-id MACHINE_UUID --alarm-tag EXACT_TAG --reason APPROVAL_REFERENCE
 python -m server.admin reprocess --upload-id UPLOAD_UUID --reason APPROVAL_REFERENCE
 ```
 
-Mapping approval creates an immutable new version and preserves other exact-match rules. A single unambiguous approved match to a machine authorized when the batch was accepted is required. Unknown, ambiguous or unauthorized mappings remain quarantined. Reprocessing is audited and idempotent; original payloads and receipts are retained. Later batches do not make older source evidence newer. Equal-marker content conflicts and unverifiable markers keep latest state uncertain.
+Reprocessing is audited and idempotent; it requires no machine mapping and retains original payloads/receipts. Later arrival does not make older source evidence newer. Equal-marker content conflicts and unverifiable markers keep latest state uncertain. See [source-scoped processing and recovery](source-scoped-processing.md).
 
 When latest state is marked uncertain, any revision pointer is a verified baseline among orderable observations, not a claim that it supersedes incomparable observations. Keep the uncertainty visible and retain the raw variants. A later known marker alone cannot resolve a different missing/unverified-marker observation; a demonstrably newer verified marker can resolve an equal-marker conflict.
 

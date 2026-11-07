@@ -26,7 +26,6 @@ PAGES = (
     ('Register source', 'Connect a SCADA database source to this server.', 'register'),
     ('Sources & setup', 'Manage registrations and export collector setup files.', 'sources'),
     ('Deployment', 'Your Linux workspace and Docker server connection.', 'deployment'),
-    ('Equipment identification', 'Review saved results alongside the original message.', 'identification'),
     ('Alarm analysis', 'Recurring alarms, daily trends and equipment evidence.', 'overview'),
 )
 
@@ -124,6 +123,60 @@ class ExportPasswordDialog(QDialog):
         super().reject()
 
 
+class EquipmentOverrideDialog(QDialog):
+    save_requested = Signal(object)
+
+    def __init__(self,parent,row):
+        super().__init__(parent)
+        self.setWindowTitle('Edit equipment suggestion')
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setMinimumWidth(560)
+        self.saving=False
+        box=QVBoxLayout(self)
+        box.setContentsMargins(24,24,24,24)
+        box.addWidget(label('Equipment for this alarm', 'sectionTitle'))
+        box.addWidget(label('Source: '+row['source_name'],'fieldLabel',True))
+        box.addWidget(label('Tag: '+(row.get('tag') or 'No tag'),'muted',True))
+        evidence=QTextEdit()
+        evidence.setReadOnly(True)
+        evidence.setPlainText(row.get('message') or 'No original message available.')
+        evidence.setMaximumHeight(130)
+        box.addWidget(evidence)
+        box.addWidget(label('Saved AI suggestion: '+(row.get('ai_suggestions') or 'No saved suggestion yet'),'help',True))
+        box.addWidget(label('Equipment name','fieldLabel'))
+        self.entry=QLineEdit(row.get('equipment_override') or row.get('ai_suggestions') or '')
+        self.entry.setPlaceholderText('Enter equipment name (up to 255 characters)')
+        box.addWidget(self.entry)
+        box.addWidget(label('Your edit applies to this exact message and tag in this source, including future matching alarms. '
+                            'The original data and saved AI suggestion are retained.','help',True))
+        self.error=label('','help',True)
+        box.addWidget(self.error)
+        self.buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.button(QDialogButtonBox.StandardButton.Save).setText('Save override')
+        self.buttons.button(QDialogButtonBox.StandardButton.Save).setObjectName('primary')
+        self.use_ai=self.buttons.addButton('Use AI again',QDialogButtonBox.ButtonRole.ActionRole)
+        self.use_ai.setEnabled(row.get('equipment_override') is not None)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        self.use_ai.clicked.connect(lambda:self.save_requested.emit(None))
+        box.addWidget(self.buttons)
+
+    def accept(self):
+        if self.saving:return
+        try:value=text(self.entry.text(),'equipment name')
+        except CollectorError as error:
+            self.error.setText(str(error));return
+        self.save_requested.emit(value)
+
+    def set_saving(self,value):
+        self.saving=value
+        self.entry.setEnabled(not value)
+        self.buttons.setEnabled(not value)
+
+    def reject(self):
+        if not self.saving:super().reject()
+
+
 class DockerManagerWindow(QMainWindow):
     def __init__(self, service, auto_refresh=True, auto_start=False):
         super().__init__()
@@ -132,8 +185,12 @@ class DockerManagerWindow(QMainWindow):
         self.closing = False
         self.form_dirty = False
         self._ai_saved_model = None
+        self._ai_enabled = None
         self._ai_pending = False
         self._analysis_pending = False
+        self.analysis_rows=[]
+        self._equipment_dialog=None
+        self._equipment_editing_available=False
         self._work = None
         self._done = None
         self._quiet_feedback = None
@@ -148,7 +205,6 @@ class DockerManagerWindow(QMainWindow):
         self.controls = []
         self.registry = {key: [] for key in ('customers', 'sites', 'projects', 'machines')}
         self.source_rows = []
-        self.ai_rows = []
         self.status = {}
         self.runtime_caption = runtime_caption()
         self.setWindowTitle('Central Server - '+self.runtime_caption)
@@ -250,7 +306,7 @@ class DockerManagerWindow(QMainWindow):
         self.pages = QStackedWidget()
         content.addWidget(self.pages, 1)
         for builder in (self._overview_page, self._register_page, self._sources_page,
-                        self._deployment_page, self._identification_page, self._analysis_page):
+                        self._deployment_page, self._analysis_page):
             self.pages.addWidget(builder())
         self.footer_frame = QFrame()
         self.footer_frame.setObjectName('footer')
@@ -495,7 +551,7 @@ class DockerManagerWindow(QMainWindow):
         refresh_box.addLayout(refresh_row)
         self.refresh_note = label('Loading saved refresh interval…', 'help', True)
         refresh_box.addWidget(self.refresh_note)
-        refresh_box.addWidget(label('Choose Off, or up to 60 minutes (default: 1). Existing saved intervals are retained. The interval starts after each refresh finishes. Updates health, received-data counts, sources and saved identification results while this window is open. '
+        refresh_box.addWidget(label('Choose Off, or up to 60 minutes (default: 1). Existing saved intervals are retained. The interval starts after each refresh finishes. Updates health, received-data counts, sources, saved AI settings and the current alarm analysis while this window is open. '
                                     'Refresh waits during other work or unsaved edits. Collector upload schedules are configured separately.', 'help', True))
         layout.addWidget(refresh_frame)
         frame, box = card()
@@ -558,44 +614,30 @@ class DockerManagerWindow(QMainWindow):
         layout.addStretch()
         return page
 
-    def _identification_page(self):
-        page, layout = self._page()
-        frame, box = card()
-        row = QHBoxLayout()
-        row.addWidget(label('Saved equipment results', 'sectionTitle'))
-        row.addStretch()
-        row.addWidget(self.button('Refresh results', self.refresh_identification, 'quiet', 'refresh'))
-        box.addLayout(row)
-        box.addWidget(label('Events use an existing authorized machine assignment; unassigned events remain uncertain. Enable optional local AI below for alarm equipment suggestions.', 'muted', True))
-        ai_controls = QHBoxLayout()
-        self.ai_model = QLineEdit('qwen3:4b')
+    def _analysis_ai_controls(self,box):
+        summary=QHBoxLayout()
+        self.ai_config_state=label('Reading saved local AI settings...','help',True)
+        summary.addWidget(self.ai_config_state,1)
+        summary.addWidget(self.button('AI settings',lambda:self.ai_settings_panel.setVisible(not self.ai_settings_panel.isVisible()),'quiet'))
+        box.addLayout(summary)
+        self.ai_settings_panel=QFrame()
+        settings=QVBoxLayout(self.ai_settings_panel)
+        controls=QHBoxLayout()
+        self.ai_model=QLineEdit('qwen3:4b')
         self.ai_model.setPlaceholderText('Installed local Ollama model')
         self.controls.append(self.ai_model)
-        ai_controls.addWidget(label('Local model', 'fieldLabel'))
-        ai_controls.addWidget(self.ai_model, 1)
-        self.enable_ai_button = self.button('Enable local AI', self.enable_machine_ai, 'primary')
-        self.disable_ai_button = self.button('Disable', self.disable_machine_ai)
-        ai_controls.addWidget(self.enable_ai_button)
-        ai_controls.addWidget(self.disable_ai_button)
-        box.addLayout(ai_controls)
-        self.ai_config_state = label('Reading saved local AI settings…', 'help', True)
-        box.addWidget(self.ai_config_state)
-        self.ai_note = label('No saved results yet. Results appear here after records are received and processed.', 'help', True)
-        box.addWidget(self.ai_note)
-        self.ai_table = self._table(('SOURCE', 'TABLE', 'RECORD ID', 'STATUS', 'EQUIPMENT', 'METHOD / MODEL'))
-        self.ai_table.itemSelectionChanged.connect(self._show_evidence)
-        box.addWidget(self.ai_table, 1)
-        box.addWidget(label('ORIGINAL MESSAGE', 'eyebrow'))
-        self.ai_evidence = QTextEdit()
-        self.ai_evidence.setReadOnly(True)
-        self.ai_evidence.setPlaceholderText('Select a result to compare the equipment name with its original message.')
-        self.ai_evidence.setMinimumHeight(85)
-        self.ai_evidence.setMaximumHeight(110)
-        box.addWidget(self.ai_evidence)
-        layout.addWidget(frame)
-        layout.addWidget(label('Names are suggestions for review. Saved data and mapping approvals remain unchanged when you view these results.', 'help', True))
-        layout.addStretch()
-        return page
+        controls.addWidget(label('Local model','fieldLabel'))
+        controls.addWidget(self.ai_model,1)
+        self.enable_ai_button=self.button('Enable local AI',self.enable_machine_ai,'primary')
+        self.enable_ai_button.setProperty('aiToggle',True)
+        self.disable_ai_button=self.button('Disable',self.disable_machine_ai)
+        controls.addWidget(self.enable_ai_button)
+        controls.addWidget(self.disable_ai_button)
+        settings.addLayout(controls)
+        self.ai_note=label('AI supplies saved equipment suggestions. Your equipment edits are kept separately.','help',True)
+        settings.addWidget(self.ai_note)
+        box.addWidget(self.ai_settings_panel)
+        self.ai_settings_panel.hide()
 
     def _analysis_page(self):
         page, layout = self._page()
@@ -619,14 +661,18 @@ class DockerManagerWindow(QMainWindow):
         box.addWidget(self.analysis_summary)
         self.analysis_freshness = label('', 'help', True)
         box.addWidget(self.analysis_freshness)
-        self.analysis_note = label('Each source/generation/record ID counts once, including quarantined alarms. '
+        self.analysis_note = label('Each source/generation/record ID counts once. No machine mapping is required. '
                                    'AI equipment suggestions are unverified and do not diagnose causes.', 'help', True)
         box.addWidget(self.analysis_note)
+        self._analysis_ai_controls(box)
         box.addWidget(label('RECURRING ALARMS · TOP 50 EXACT MESSAGE / TAG GROUPS', 'eyebrow'))
         self.analysis_issues = self._table(('SOURCE', 'TAG', 'ORIGINAL MESSAGE', 'OCCURRENCES',
-                                          'APPROVED EQUIPMENT', 'AI SUGGESTIONS · UNVERIFIED'))
+                                          'EQUIPMENT', 'AI SUGGESTIONS · UNVERIFIED'))
+        self.analysis_issues.itemSelectionChanged.connect(self._sync_controls)
         self.analysis_issues.setMinimumHeight(190)
         box.addWidget(self.analysis_issues, 2)
+        self.edit_equipment_button=self.button('Edit / override equipment',self.edit_equipment,'primary')
+        box.addWidget(self.edit_equipment_button)
         box.addWidget(label('DAILY ALARM OCCURRENCES · KNOWN SOURCE START DATES IN UTC', 'eyebrow'))
         self.analysis_daily = self._table(('UTC DAY', 'OCCURRENCES', 'RELATIVE ACTIVITY'))
         self.analysis_daily.setMinimumHeight(125)
@@ -681,8 +727,11 @@ class DockerManagerWindow(QMainWindow):
         self._start('Analyzing saved alarm occurrences…', operation, shown)
 
     def _show_analysis(self, result):
+        selected=self.selected_alarm_group()
         self.analysis_issues.setRowCount(0)
         self.analysis_daily.setRowCount(0)
+        self.analysis_rows=[]
+        self._equipment_editing_available=result.get('equipment_editing_available',False)
         if 'error' in result:
             self.analysis_freshness.clear()
             self.analysis_summary.setText(result['error'])
@@ -698,17 +747,20 @@ class DockerManagerWindow(QMainWindow):
             self.analysis_freshness.setText('Analysis reads the saved source history directly.')
         summary = result['summary']
         self.analysis_summary.setText(f"{summary['occurrences']:,} alarm occurrences · "
-                                      f"{summary['saved_versions']:,} saved versions · "
-                                      f"{summary['confirmed_equipment']:,} approved equipment mappings")
+                                      f"{summary['saved_versions']:,} saved versions")
         self.analysis_note.setText(f"{summary['uncertain_time']:,} occurrences have uncertain source times; "
-                                   f"{summary['uncertain_order']:,} have uncertain revision order; "
-                                   f"{summary['unmapped']:,} lack a verified approved equipment mapping. "
+                                   f"{summary['uncertain_order']:,} have uncertain revision order. "
                                    'AI suggestions are unverified equipment labels, not diagnosed causes.')
         self.analysis_issues.setRowCount(len(result['issues']))
+        self.analysis_rows=result['issues']
         for index, row in enumerate(result['issues']):
             for column, value in enumerate((row['source_name'], row['tag'], row['message'], row['occurrences'],
-                                            row['confirmed_equipment'], row['ai_suggestions'])):
+                                            row.get('equipment_name') or row['ai_suggestions'],row['ai_suggestions'])):
                 self.analysis_issues.setItem(index, column, QTableWidgetItem(str(value) if value is not None else 'Uncertain / unavailable'))
+            self.analysis_issues.item(index,4).setToolTip('Edited by user' if row.get('equipment_origin')=='manual' else 'Unverified saved AI suggestion')
+            if selected and row.get('condition_key')==selected.get('condition_key') and row.get('source_id')==selected.get('source_id'):
+                self.analysis_issues.selectRow(index)
+        self._sync_controls()
         self.analysis_daily.setRowCount(len(result['daily']))
         largest = max((row['occurrences'] for row in result['daily']), default=1)
         for index, row in enumerate(result['daily']):
@@ -721,21 +773,61 @@ class DockerManagerWindow(QMainWindow):
             self.analysis_daily.setCellWidget(index, 2, bar)
         self.footer.setText('Alarm analysis updated from saved records. AI settings are unchanged.')
 
+    def selected_alarm_group(self):
+        if not hasattr(self,'analysis_issues'):return None
+        index=self.analysis_issues.currentRow()
+        return self.analysis_rows[index] if 0<=index<len(self.analysis_rows) and self.analysis_issues.selectedItems() else None
+
+    def edit_equipment(self):
+        row=self.selected_alarm_group()
+        if self.busy or not row or not self._equipment_editing_available or not row.get('equipment_editable',True):return
+        if self._equipment_dialog is not None:
+            self._equipment_dialog.raise_();return
+        captured=dict(row)
+        dialog=EquipmentOverrideDialog(self,captured)
+        self._equipment_dialog=dialog
+        self.refresh_timer.stop()
+        dialog.finished.connect(self._equipment_editor_closed)
+        dialog.finished.connect(dialog.deleteLater)
+        dialog.save_requested.connect(lambda value:self._save_equipment(captured,dialog,value))
+        dialog.open()
+
+    def _equipment_editor_closed(self,*args):
+        self._equipment_dialog=None
+        self._arm_refresh_timer()
+        self._sync_controls()
+
+    def _save_equipment(self,row,dialog,value):
+        if self.busy:return
+        dialog.error.setText('Saving equipment…')
+        dialog.set_saving(True)
+        def operation():
+            try:
+                return self.service.save_equipment_override(customer_id=row['customer_id'],source_id=row['source_id'],
+                    condition_key=row['condition_key'],equipment_label=value,expected_version=row.get('override_version',0))
+            except CollectorError as error:return dict(error=str(error))
+        def saved(result):
+            dialog.set_saving(False)
+            if 'error' in result:
+                dialog.error.setText(result['error'])
+                self.footer.setText('Equipment was not saved. Your edit is retained in the editor.')
+                return
+            QDialog.accept(dialog)
+            self.footer.setText('Equipment override saved.' if value is not None else 'Equipment override cleared. Saved AI suggestions are shown again.')
+            self.refresh_analysis(preserve_feedback=True)
+        self._start('Saving equipment override…',operation,saved)
+
     def navigate(self, index):
         self.pages.setCurrentIndex(index)
         self.nav_buttons[index].setChecked(True)
         self.page_title.setText(PAGES[index][0])
         self.page_subtitle.setText(PAGES[index][1])
         if index == 4:
+            self._analysis_pending=True
             if self.busy:
-                self._ai_pending = True
+                self._ai_pending=True
             elif self.status:
-                self.refresh_identification()
-        elif index == 5:
-            if self.busy:
-                self._analysis_pending = True
-            elif self.status:
-                self.refresh_analysis()
+                self.refresh_ai_settings()
 
     def _form_edited(self, *args):
         self.form_dirty = True
@@ -844,6 +936,10 @@ class DockerManagerWindow(QMainWindow):
     def _sync_controls(self):
         for control in self.controls:
             control.setEnabled(not self.busy)
+        self.enable_ai_button.setEnabled(not self.busy and self._ai_enabled is False)
+        self.disable_ai_button.setEnabled(not self.busy and self._ai_enabled is True)
+        self.enable_ai_button.setToolTip('AI is already enabled. Disable it first to change the active model.'
+                                        if self._ai_enabled is True else 'Enable the saved local AI model.')
         for name, choice in getattr(self, 'choices', {}).items():
             if name in self.names:
                 self.names[name].setEnabled(not self.busy and choice.currentData() is None)
@@ -854,6 +950,11 @@ class DockerManagerWindow(QMainWindow):
         selected = self.selected_source() is not None and self.status.get('database_ready', False)
         for control in (self.export_button, self.rotate_button, self.delete_button):
             control.setEnabled(not self.busy and selected)
+        row=self.selected_alarm_group()
+        self.edit_equipment_button.setEnabled(not self.busy and self.status.get('database_ready',False)
+            and self._equipment_editing_available and row is not None and bool(row.get('message') or row.get('tag'))
+            and row.get('equipment_editable',True)
+            and self._equipment_dialog is None)
         self._update_deployment_preview()
 
     def _start(self, message, operation, done, quiet=False):
@@ -898,7 +999,7 @@ class DockerManagerWindow(QMainWindow):
             QTimer.singleShot(0, self.close)
         elif self._ai_pending and not self.busy:
             self._ai_pending = False
-            self.refresh_identification(preserve_feedback=True)
+            self.refresh_ai_settings(preserve_feedback=True)
         elif self._analysis_pending and not self.busy:
             self._analysis_pending = False
             self.refresh_analysis(preserve_feedback=True)
@@ -911,7 +1012,7 @@ class DockerManagerWindow(QMainWindow):
             result = dict(status=status, catalog=self.service.catalog() if status['database_ready'] else {key: [] for key in self.registry},
                           sources=self.service.sources() if status['database_ready'] else [])
             try:
-                result['ai'] = self.service.machine_interpretations(include_records=status['database_ready'])
+                result['ai'] = self.service.machine_interpretations(include_records=False)
             except CollectorError as error:
                 result['ai_error'] = str(error)
             if not self._refresh_preferences_loaded:
@@ -950,7 +1051,7 @@ class DockerManagerWindow(QMainWindow):
 
     def _automatic_refresh(self):
         self.refresh_timer.stop()
-        if (not self._saved_refresh_interval or self.busy or self.closing or not self.isVisible() or self.form_dirty or self._deployment_dirty()
+        if (not self._saved_refresh_interval or self.busy or self.closing or self._equipment_dialog is not None or not self.isVisible() or self.form_dirty or self._deployment_dirty()
                 or self._refresh_seconds() != self._saved_refresh_interval
                 or (self._ai_saved_model is not None and self.ai_model.text() != self._ai_saved_model)):
             self._arm_refresh_timer()
@@ -958,7 +1059,7 @@ class DockerManagerWindow(QMainWindow):
         self.refresh(quiet=True)
 
     def _arm_refresh_timer(self):
-        if self._saved_refresh_interval and not self.busy and not self.closing:
+        if self._saved_refresh_interval and not self.busy and not self.closing and self._equipment_dialog is None:
             self.refresh_timer.start(self._saved_refresh_interval * 1000)
 
     def _show_snapshot(self, result, success_message=None):
@@ -1015,10 +1116,10 @@ class DockerManagerWindow(QMainWindow):
         self.source_actions.setVisible(bool(self.source_rows))
         self._source_selected()
         self._analysis_filters()
-        if self.pages.currentIndex() == 5:
+        if self.pages.currentIndex() == 4:
             self._analysis_pending = True
         if 'ai' in result:
-            self._show_identification(result['ai'])
+            self._show_ai_settings(result['ai'])
         elif result.get('ai_error'):
             self.ai_note.setText(result['ai_error'])
         self._sync_controls()
@@ -1112,79 +1213,68 @@ class DockerManagerWindow(QMainWindow):
     def delete_source(self):
         source = self.selected_source()
         if not self.busy and source and self.confirm('Delete source registration?',
-                f"Remove {source['name']}?\n\nThis revokes all its upload credentials. Received data, mappings and audit history remain saved. "
+                f"Remove {source['name']}?\n\nThis revokes all its upload credentials. Received data and audit history remain saved. "
                 'Unsent batches stay on the Collector. This registration cannot be restored from this window.'):
             self._start('Removing the source registration…', lambda: self.service.delete_source(source['source_id']),
                         lambda result: self.refresh('Source removed. Upload credentials revoked; received history retained.'))
 
-    def refresh_identification(self, preserve_feedback=False):
+    def refresh_ai_settings(self, preserve_feedback=False):
         previous = self.footer.text()
         def operation():
             try:
-                status = self.service.status()
-                return self.service.machine_interpretations(include_records=status['database_ready'])
+                return self.service.machine_interpretations(include_records=False)
             except CollectorError as error:
                 return dict(error=str(error))
         def shown(result):
             if 'error' in result:
                 self.ai_note.setText(result['error'])
             else:
-                self._show_identification(result)
-            self.footer.setText(previous if preserve_feedback else 'Saved equipment results refreshed.')
-        self._start('Reading saved identification results…', operation, shown)
+                self._show_ai_settings(result)
+            self.footer.setText(previous if preserve_feedback else 'Saved AI settings refreshed.')
+        self._start('Reading saved AI settings...', operation, shown)
 
-    def _show_identification(self, result):
-        if 'configuration' in result:
-            self._show_ai_configuration(result['configuration'])
-        self.ai_rows = result['rows']
-        self.ai_table.setRowCount(len(self.ai_rows))
-        self.ai_evidence.clear()
-        for index, row in enumerate(self.ai_rows):
-            names = ', '.join(dict.fromkeys(candidate['label'] for candidate in row['candidates']))
-            method = 'Registered machine tag' if row.get('policy_version') == 'registered-event-machine-v1' else row['model'] or 'Not yet run'
-            for column, value in enumerate((row['source_name'], row['source_table'], row['source_record_id'], row['status'], names or 'Uncertain', method)):
-                self.ai_table.setItem(index, column, QTableWidgetItem(str(value)))
-        self.ai_table.clearSelection()
-        self.ai_table.setCurrentCell(-1, -1)
-        self.ai_evidence.clear()
-        self.ai_note.setText(('Saved results from this server. Select a row to inspect the original message.' if self.ai_rows else
-                              'No saved results yet. Results appear after records are received and processed.')
-                             if result.get('records_available', True) else 'Start the server to load its saved results. The saved AI choice is retained.')
+    def _show_ai_settings(self,result):
+        if 'configuration' in result:self._show_ai_configuration(result['configuration'])
+        self.ai_note.setText('AI supplies saved equipment suggestions. Your equipment edits are kept separately.')
 
     def _show_ai_configuration(self, configuration):
         saved = configuration['model']
+        self._ai_enabled = configuration['enabled']
         if self._ai_saved_model is None or self.ai_model.text() == self._ai_saved_model:
             self.ai_model.setText(saved)
         self._ai_saved_model = saved
         runtime = 'Private Docker Ollama service.' if getattr(self.service, 'ai_provider', '1') == 'container' else 'Ollama on this Central Server PC.'
         self.ai_config_state.setText(('Enabled' if configuration['enabled'] else 'Disabled') + ' · Saved model: ' + saved +
                                      '. ' + runtime)
+        self._sync_controls()
 
     def enable_machine_ai(self):
-        if self.busy:
+        if self.busy or self._ai_enabled is not False:
             return
         model = self.ai_model.text().strip()
         def enabled(result):
             self._show_ai_configuration(result)
             self.footer.setText('Local AI enabled. Alarm equipment suggestions use the saved local model.')
-            self.refresh_identification(preserve_feedback=True)
+            self._analysis_pending=self.pages.currentIndex()==4
+            self.refresh_ai_settings(preserve_feedback=True)
         self._start('Checking the installed local model and enabling AI…', lambda: self.service.enable_machine_ai(model), enabled)
 
     def disable_machine_ai(self):
-        if self.busy:
+        if self.busy or self._ai_enabled is not True:
             return
         def disabled(result):
             self._show_ai_configuration(result)
             self.footer.setText('Local AI disabled. Saved results are retained.')
-            self.refresh_identification(preserve_feedback=True)
+            self._analysis_pending=self.pages.currentIndex()==4
+            self.refresh_ai_settings(preserve_feedback=True)
         self._start('Disabling local AI…', self.service.disable_machine_ai, disabled)
 
-    def _show_evidence(self):
-        index = self.ai_table.currentRow()
-        self.ai_evidence.setPlainText(self.ai_rows[index].get('original_message') or 'No original message available.'
-                                      if 0 <= index < len(self.ai_rows) else '')
-
     def closeEvent(self, event):
+        if self._equipment_dialog is not None and self._equipment_dialog.isVisible():
+            self._equipment_dialog.raise_()
+            self.footer.setText('Finish or cancel the equipment editor before closing.')
+            event.ignore()
+            return
         if self.busy:
             self.closing = True
             self.footer.setText('Finishing the current operation before closing…')

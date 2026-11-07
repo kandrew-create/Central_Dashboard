@@ -84,7 +84,7 @@ class ManagementIntegrationTests(PostgresCase):
             tables=db.execute("SELECT relname,relkind FROM pg_class WHERE relnamespace=%s::regnamespace AND relkind IN ('r','v','m','p') ORDER BY relname",('"'+schema+'"',)).fetchall()
         self.assertRegex(schema,r'^SCADA PC(?:_[0-9a-f]+)?$')
         self.assertEqual([(r['relname'],r['relkind']) for r in tables],[('alarmhistory','r'),('eventhistory','r')])
-        self.assertEqual(next(r for r in self.service.sources() if str(r['source_id'])==source['source_id'])['storage_schema'],schema)
+        self.assertIsNone(next(r for r in self.service.sources() if str(r['source_id'])==source['source_id'])['storage_schema'])
         self.service.delete_source(source['source_id'])
         with self.service.connection() as db:
             self.assertEqual(db.execute('SELECT schema_name FROM platform.source_storage WHERE source_id=%s',(source['source_id'],)).fetchone()['schema_name'],schema)

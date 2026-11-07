@@ -1,6 +1,6 @@
 # Simple Central Server browsing in pgAdmin
 
-For current installations upgraded through `0012_shared_source_storage`, new sources use **warehouse → Tables → fact_alarm_occurrence / fact_event_occurrence** and **reporting → Tables** for summaries. Original revisions remain in `platform`. Existing source-specific tables described below remain compatible, but are no longer created for new registrations. Add `warehouse,reporting` to a connection's schema restriction only after its reader has the required customer-scoped privileges; changing a navigation filter does not grant access. The existing Windows/WSL browser connection below was not reprovisioned by the VMware warehouse deployment. See [current warehouse structure](source-table-layout.md).
+Current installations through `0014_named_warehouse_views` use **warehouse -> Tables -> fact_alarm_occurrence / fact_event_occurrence** and **reporting -> Tables**. The old per-source duplicate schemas/tables have been removed after canonical-evidence validation. Original revisions and receipts remain in `platform`, with shared facts separated by customer/source/generation UUIDs. See [storage and upgrade safeguards](source-table-layout.md).
 
 ## Docker browser on this Central Server PC
 
@@ -10,14 +10,59 @@ Sign in at the browser's username/password prompt as **Linkent**, using the exis
 
 Username sign-in uses Caddy HTTP Basic authentication and pgAdmin's supported [webserver authentication](https://www.pgadmin.org/docs/pgadmin4/latest/webserver.html). The proxy verifies a bcrypt hash of the existing generated password, overwrites the asserted identity header and supplies a private shared secret. pgAdmin accepts only the proxy's exact IPv4 address and its IPv6-mapped equivalent. The backend has no published host port; only the proxy publishes loopback port 5050. The original account ID, administrator role, saved server and database reader remain preserved. Email remains bootstrap metadata and is no longer the sign-in identifier. Browsers can cache Basic authentication until closed; pgAdmin's Logout button alone does not clear those browser credentials.
 
-Expand **Servers → Linker Central Server → Central Server - read only → Databases → scada_platform → Schemas → ELT250330DB → Tables**. Right-click **alarmhistory** or **eventhistory**, then choose **View/Edit Data → All Rows**. The current tables contain nine alarm rows and one event row. Use Query Tool for bounded checks:
+Expand **Servers -> Linker Central Server -> Central Server - read only -> Databases -> scada_platform -> Schemas -> warehouse -> Tables**. Right-click **fact_alarm_occurrence** or **fact_event_occurrence**, then **View/Edit Data -> All Rows**. Open **reporting -> Tables** for maintained summaries and **warehouse -> Views** for dimensions. Refresh **Schemas**, or disconnect/reconnect the saved server, if the browser still shows the removed schema.
 
 ```sql
-SELECT count(*) FROM "ELT250330DB".alarmhistory;
-SELECT count(*) FROM "ELT250330DB".eventhistory;
+SELECT s.name AS source_name, f.source_id, f.generation_id,
+       f.source_record_id, f.saved_versions, f.source_time_uncertain
+FROM warehouse.fact_alarm_occurrence f
+JOIN warehouse.dim_source s USING (customer_id, source_id)
+ORDER BY s.name, f.generation_id, f.source_record_id
+LIMIT 100;
 ```
 
-The dedicated reader has SELECT on only the intended customer's current source tables, no role memberships or storage ownership, a customer-scoped session default, and read-only transactions by default. Explicit write and upload-credential-table access checks were denied. New sources require an explicit scoped grant; a schema filter alone is not authorization. No SCADA source database settings were changed.
+## Filter by project or source name
+
+Migration `0014_named_warehouse_views` adds **reporting -> Views -> alarm_occurrences / event_occurrences**. These read-only views include `customer_name`, `site_name`, `project_name` and `source_name` before the unchanged fact fields. They join shared dimensions without creating per-project/source copies. Current labels update immediately; UUIDs remain the identity, and caller permissions/RLS still apply.
+
+For the source whose name starts with ELT250330, open **Query Tool** and run:
+
+```sql
+SELECT *
+FROM reporting.alarm_occurrences
+WHERE source_name ILIKE 'ELT250330%'
+ORDER BY source_record_id
+LIMIT 100;
+```
+
+For events, use `reporting.event_occurrences`. ELT250330 currently matches a registered **source** name, not a project label. To find the actual project and available sources:
+
+```sql
+SELECT DISTINCT project_name, source_name, project_id, source_id
+FROM reporting.alarm_occurrences
+UNION
+SELECT DISTINCT project_name, source_name, project_id, source_id
+FROM reporting.event_occurrences
+ORDER BY project_name, source_name;
+```
+
+To filter a registered project, use `WHERE project_name = 'the registered project name'`. Names can repeat across customers/sites/projects; use the retained UUIDs when exact identity matters. In **View/Edit Data**, select the named view and use **Filter/Sort** with `source_name ILIKE 'ELT250330%'` or `project_name = 'the registered project name'` as the filter expression (omit `WHERE` in that dialog).
+
+Without migration 0014, query `warehouse.fact_alarm_occurrence` or `warehouse.fact_event_occurrence` and join the existing dimensions:
+
+```sql
+SELECT p.name AS project_name, s.name AS source_name, f.*
+FROM warehouse.fact_alarm_occurrence f
+JOIN warehouse.dim_project p USING (customer_id, site_id, project_id)
+JOIN warehouse.dim_source s USING (customer_id, site_id, project_id, source_id)
+WHERE s.name ILIKE 'ELT250330%'
+ORDER BY f.source_record_id
+LIMIT 100;
+```
+
+The existing reader now has direct SELECT on shared facts/summaries and the dimension columns needed by invoker views. Fixed-customer **restrictive RLS policies** enforce its customer authorization even if arbitrary SQL changes `app.customer_id`. The reader has no role memberships, owner privileges or access to original payloads, upload credentials or writes. Default transactions remain read-only. Newly registered sources for this customer appear in shared tables; no per-source schema grants are needed. Additional customer access requires separate explicit provisioning.
+
+The saved database schema restriction is `warehouse,reporting`. This is navigation only and does not grant access; it can still list internal refresh objects which the reader cannot query. The profile was backed up before changing this filter, and the account, passfile and connection were retained.
 
 The service definition is `deploy/docker-compose.pgadmin.yml`, with proxy configuration in `deploy/pgadmin/Caddyfile`. This PC's private WSL `~/central-server/secrets/pgadmin/settings.env` selects the login username, unused private proxy subnet/address, bcrypt hash and shared secret; keep this file mode 0600 outside Git. Credentials and preconfigured server definitions live in the separate `linker-central-pgadmin_pgadmin-secrets` Docker volume, readable only by pgAdmin's UID 5050. Its profile is in `linker-central-pgadmin_pgadmin-data`. The profile also holds a mode-0400 copy of the reader passfile at `storage/Linkent/pgpass`; the saved server uses relative `passfile=pgpass` to satisfy pgAdmin's per-user file confinement. Preserve both volumes and the private pre-change profile backup; do not reset them to repair login. Container logging is disabled. Local commissioning helpers under `.tools/` are PC-specific and not portable installers. These templates require the privately provisioned account and passfile; they are not a fresh-install provisioning workflow.
 
@@ -35,36 +80,8 @@ docker compose --project-name linker-central-pgadmin \
 
 Closing the browser does not stop Central Server. Stopping pgAdmin also leaves Central Server and Docker Ollama running. Verification covered the actual web login, server connection/reconnection, customer-scoped row counts, denied writes/credential reads and loopback-only configuration. No broad application suite was repeated for this optional browser setup.
 
-Central Server 0.6.1 provides this layout for each registered source:
+## Earlier published installers
 
-The schema name below is an example; your registered source name is used. Duplicate, reserved or long labels receive the safe adjustments described in [storage details](source-table-layout.md).
+Published Central Server 0.6.1 uses a source-named schema with `alarmhistory` and `eventhistory`. Current migration 0013 removes those verified copies. Do not use old per-source queries after upgrading. Original native fields, separate milliseconds and saved content versions remain in the authoritative ledger, accessible only through appropriately authorized administrative workflows. The `logs` compatibility views also remain; they contain no physical copies.
 
-```text
-Schemas
-└── Oven Line SCADA
-    └── Tables
-        ├── alarmhistory
-        └── eventhistory
-```
-
-Each source uses its registered SCADA PC/source name. Select a source in the manager to see its SQL schema. These are real tables, maintained by Central Server. Right-click a table and choose **View/Edit Data → All Rows** to read its records. Direct row changes are blocked to preserve collected history.
-
-For bounded SQL reads, quote the schema name exactly:
-
-```sql
-SELECT id, al_message, equipment, identification_status
-FROM "Oven Line SCADA".alarmhistory
-ORDER BY generation_id, id, received_at
-LIMIT 100;
-
-SELECT id, ev_message, equipment, identification_status
-FROM "Oven Line SCADA".eventhistory
-ORDER BY generation_id, id, received_at
-LIMIT 100;
-```
-
-All native fields, separate milliseconds and saved revisions remain available. Unchanged repeat collection adds no revision. A changed record can retain multiple rows with the same native ID; `revision_id` identifies each stored content version. See [storage and synchronization](source-table-layout.md).
-
-In **scada_platform → Properties → Advanced → Schema restriction**, enter the wanted schemas, such as `Oven Line SCADA,Packaging SCADA`, then refresh **Schemas** or reopen pgAdmin. Restrict the Central Server connection's database list to `scada_platform` if desired. Add newly registered source schemas to this restriction to display them. Existing window contents can remain cached until refreshed.
-
-Internal `platform` tables and the earlier `logs` views remain preserved and hidden by this preference. Clear the restriction and refresh to browse them again. Hiding schemas changes navigation only; authorized SQL access and permissions remain unchanged. Other server connections remain untouched. Back up the private pgAdmin profile before changing its stored preferences.
+The local 7 November 2026 update verified the existing browser login, connection and reconnect without a password prompt; all dimension views and shared summaries were readable. Changing the customer setting exposed no other customer, and credential/raw-payload reads, writes and role switching were denied. See [deployment and test evidence](shared-storage-removal-2026-11-07.md).

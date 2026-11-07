@@ -1,35 +1,14 @@
 # Source registration without a machine selection
 
-The Windows/Tk and Linux/Qt managers register a SCADA database using its customer,
-site, project and source name. Select existing hierarchy entries or enter new
-names. Neither form has an Existing machine selector or New machine tag entry.
-Registration creates a source, collector, generation, protected upload credential
-and draft mapping version. It never chooses a machine automatically or invents a
-machine tag.
+The Windows/Tk and Linux/Qt managers register a SCADA database using customer, site, project and source name. Select existing hierarchy entries or enter new names. Neither form has a machine selector or tag entry. Registration creates a source, collector, generation and protected upload credential, with no draft mapping or invented machine identity.
 
-New credentials authorize only their registered source and initially have no
-machine authorizations. Collector connection checks, encrypted setup export,
-credential replacement and raw upload acceptance work before equipment is
-assigned. Records with unknown mappings remain quarantined. An approved mapping
-outside the credential's machine scope is still rejected; an empty scope is never
-a wildcard.
+Credentials authorize only their registered customer/source/generation. Encrypted setup export, connection checks, credential replacement, upload acceptance and processing work without machine assignment or mapping approval. Central-only 0015 retires the mapping gate and releases historical holds for completed jobs; failed or unfinished jobs still need processing. See [source-scoped processing](source-scoped-processing.md).
 
-Event identification uses a single explicitly authorized machine from the scope
-saved when the upload was accepted. With no such assignment, the result is
-uncertain, with no candidates and no model call. Event messages and `ev_source`
-never supply a substitute identity. Alarm AI suggestions remain separate from
-approved machine mappings.
+Optional event identification uses a single explicitly authorized machine from the immutable scope saved when the upload was accepted. With no such assignment, identification remains uncertain, without candidates or a model call. Events never derive a substitute identity from messages or `ev_source`. This optional identity does not gate upload processing. Alarm AI suggestions remain separate and unverified.
 
-Existing sources, machine UUIDs, credentials, mappings and event identities are
-preserved. Administrative registration with an explicit machine ID or tag remains
-available for compatibility. Later machine authorization and mapping approval
-require explicit administration; they do not expand the immutable scope of
-already accepted uploads. Replacing an unassigned credential retains an empty
-machine scope.
+Existing source/machine UUIDs, credentials, scope, original data, receipts, historical annotations and registered event identity remain preserved. Administrative registration with an explicit machine remains available for existing event identity; an empty scope never authorizes every machine. Credential replacement retains that scope. No Collector protocol change is needed.
 
-This change needs no schema migration or upload-protocol change. Linux managers
-need both the updated GUI and rebuilt management image; published installers
-remain unchanged until rebuilt.
+Deploy matching GUI/API/worker code and migrate Central storage through 0015 before resuming services. Published installers remain unchanged until rebuilt. The evidence below records the earlier registration-only change, including its former mapping behavior; current behavior is described above.
 
 ## Verification on 6 November 2026
 

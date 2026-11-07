@@ -20,7 +20,8 @@ from server.management.service import ManagerService, text
 
 
 ACTIONS = frozenset(('counts', 'catalog', 'sources', 'register', 'delete_source', 'rotate',
-                     'export', 'batches', 'machine_interpretations', 'enable_machine_ai', 'disable_machine_ai', 'alarm_analysis'))
+                     'export', 'batches', 'machine_interpretations', 'enable_machine_ai', 'disable_machine_ai', 'alarm_analysis',
+                     'save_equipment_override'))
 
 
 class DockerAgent(ManagerService):
@@ -60,7 +61,7 @@ class DockerAgent(ManagerService):
             raise CollectorError('Docker management requires this project\'s Central database service and migration identity.')
         with psycopg.connect(url, row_factory=dict_row, connect_timeout=5,
                              options='-c statement_timeout=5000 -c lock_timeout=2000') as db:
-            if not db.execute("SELECT to_regclass('platform.source_storage') storage").fetchone()['storage']:
+            if not db.execute("SELECT to_regclass('platform.sources') storage").fetchone()['storage']:
                 raise CollectorError('Initialize the Central Server schema before opening the Docker manager.')
             yield db
 

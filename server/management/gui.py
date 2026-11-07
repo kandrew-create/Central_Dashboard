@@ -507,7 +507,7 @@ class ManagerWindow:
                  f"Customer: {row['customer_name']}\nSite: {row['site_name']}\nProject: {row['project_name']}\n"
                  f"Source ID: {row['source_id']}\n\n"
                  'This removes the registration from this list and revokes all its upload credentials. '
-                 'Received records, mappings and audit history are retained. '
+                 'Received records and audit history are retained. '
                  'Unsent batches remain on the collector and cannot upload using this registration.\n\n'
                  'This cannot be undone from this window. Continue?')
         if not messagebox.askyesno('Delete registered SCADA source',message,parent=self.root,icon='warning',default='no'):return
